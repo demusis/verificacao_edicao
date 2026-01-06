@@ -1,0 +1,7 @@
+typer
+pyside6
+reportlab
+tzdata
+numpy
+scipy
+pyinstaller
