@@ -1,4 +1,4 @@
-# Forensic Video Analyzer
+# Aplicativo para auxílio a trabalhos forenses de verificação de edição de arquivos de imagem/vídeo
 
 Ferramenta profissional e auditável para **Análise Forense de Multimídia (Vídeo e Imagem)**, projetada para detectar indícios de edição, adulteração, deepfakes e recompressão em arquivos digitais.
 
