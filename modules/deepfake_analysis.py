@@ -111,6 +111,14 @@ class DeepfakeAnalysisModule:
             
             result["temporal_jitter"] = int((jitter_cons + jitter_fft + jitter_tex) / 3)
             
+            # Se algum frame foi suspeito, o vídeo é suspeito
+            for frame_cons in history_consistency:
+                if frame_cons > 70: result["is_suspicious"] = True
+            for frame_fft in history_fft:
+                if frame_fft > 70: result["is_suspicious"] = True
+            for frame_tex in history_texture:
+                if frame_tex > 70: result["is_suspicious"] = True
+            
 
             
             jitter_threshold = int(self.config.get('deepfake_jitter_threshold', 15))
@@ -132,7 +140,7 @@ class DeepfakeAnalysisModule:
             "type": "image",
             "detected_faces": 0,
             "detected_bodies": 0,
-            "consistency_score": 100,
+            "consistency_score": 0,
             "frequency_score": 0,
             "texture_score": 0,
             "eye_consistency": "N/A",
@@ -152,12 +160,17 @@ class DeepfakeAnalysisModule:
             if "Textura facial anormalmente lisa" not in str(result["details"]):
                 result["details"].append("Textura artificial detectada consistentemente.")
 
+        if result["consistency_score"] > 70:
+            result["is_suspicious"] = True
+            if "Inconsistência física" not in str(result["details"]):
+                result["details"].append("Inconsistência de ruído/iluminação entre sujeito e fundo.")
+
     def _analyze_frame(self, img):
         """Analisa um único frame (numpy array)."""
         res = {
             "detected_faces": 0,
             "detected_bodies": 0,
-            "consistency_score": 100,
+            "consistency_score": 0,
             "frequency_score": 0,
             "texture_score": 0,
             "is_suspicious": False,
@@ -190,8 +203,10 @@ class DeepfakeAnalysisModule:
         max_var = max(noise_var_subject, noise_var_bg, 1e-5)
         diff_ratio = abs(noise_var_subject - noise_var_bg) / max_var
         
+        # Converte ratio (0-1) para score (0-100)
+        res["consistency_score"] = int(diff_ratio * 100)
+
         if diff_ratio > (int(self.config.get('deepfake_noise_threshold', 50)) / 100.0):
-            res["consistency_score"] -= 40
             res["details"].append(f"Inconsistência de Ruído ({diff_ratio:.2f})")
             if diff_ratio > 0.7: res["is_suspicious"] = True
 

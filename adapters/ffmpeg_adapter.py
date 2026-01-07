@@ -35,6 +35,7 @@ class FFmpegAdapter:
         cmd = [
             self.ffprobe_path,
             "-v", "quiet",
+            "-find_stream_info",
             "-print_format", "json",
             "-show_format",
             "-show_streams",
@@ -85,13 +86,13 @@ class FFmpegAdapter:
                 self.logger.log("EXEC_ERROR", {"msg": str(e)})
             raise
 
-    def extract_frame_sizes(self, filepath: Path) -> List[int]:
+    def extract_frame_sizes(self, filepath: Path) -> Dict[str, Any]:
         """Extrai o tamanho em bytes de cada frame para análise estatística (Benford/Fourier)."""
         cmd = [
             self.ffprobe_path,
             "-v", "quiet",
             "-select_streams", "v:0",
-            "-show_entries", "frame=pkt_size",
+            "-show_entries", "frame=pict_type,pkt_size,pkt_pts_time,pkt_dts_time",
             "-of", "json",
             str(filepath)
         ]
@@ -131,4 +132,4 @@ class FFmpegAdapter:
         except Exception as e:
             if self.logger:
                 self.logger.log("EXEC_ERROR", {"msg": f"Erro extracting frame sizes: {str(e)}"})
-            return []
+            return {"all": [], "I": [], "P": [], "B": [], "packets": []}

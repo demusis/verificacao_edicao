@@ -126,7 +126,7 @@ class QuantizationAnalysisModule:
                 "num_ref_frames": num_ref_frames,
                 "scan_type": scan_type,
                 "entropy_coding": entropy,
-                "trace_snippet": log[:500] if found_sps else "No SPS found in trace"
+                "trace_snippet": log[:500] if found_sps else "SPS não encontrado nos primeiros frames."
             }
             
         except Exception as e:
@@ -217,24 +217,27 @@ class QuantizationAnalysisModule:
         parts = []
         
         # Scaling Matrix
-        if has_custom:
-            parts.append(f"Matrizes Customizadas (Profile {profile}), típico de encoders avançados.")
+        if profile != "Unknown":
+            if has_custom:
+                parts.append(f"Matrizes Customizadas detectadas (Perfil {profile}), indicando assinatura de encoder avançado ou otimizado.")
+            else:
+                parts.append(f"Matrizes Uniformes (Padrão) detectadas (Perfil {profile}), comum em compressões rápidas ou dispositivos móveis.")
         else:
-            parts.append(f"Matrizes Padrão/Flat (Profile {profile}).")
+            parts.append("Perfil de compressão não identificado (SPS ausente ou codec não suportado para extração de matriz).")
             
         # Ref Frames
         refs = q.get("num_ref_frames", 0)
-        if refs > 4:
-            parts.append(f"Alto uso de quadros de referência ({refs}), indicando foco em compressão (Longo GOP).")
+        if isinstance(refs, int) and refs > 4:
+            parts.append(f"Uso elevado de quadros de referência ({refs}), sugerindo transcodificação ou alta eficiência temporal.")
         
         # BPP
         if bpp > 0:
             if bpp < 0.1:
-                qual_est = "baixa densidade (alta compressão)"
+                qual_est = "alta compressão (baixa densidade de bits)"
             elif bpp > 0.25:
-                qual_est = "alta densidade (baixa compressão)"
+                qual_est = "baixa compressão (alta fidelidade de bits)"
             else:
-                qual_est = "densidade média"
-            parts.append(f"BPP de {bpp:.3f} indica {qual_est}.")
+                qual_est = "compressão média"
+            parts.append(f"A taxa de {bpp:.3f} bits por pixel indica {qual_est}.")
             
         return " ".join(parts)

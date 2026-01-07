@@ -24,7 +24,12 @@ class FileAnalysisModule:
             # 2. Extração de Metadados (Container)
             self.logger.log("METADATA_EXTRACT_START")
             metadata = self.ffmpeg.probe_file(input_file)
-            self.logger.log("METADATA_EXTRACT_END")
+            
+            if not metadata or not metadata.get("format"):
+                 self.logger.log("METADATA_EXTRACT_WARNING", {"msg": "Metadados vazios ou incompletos retornados pelo FFprobe"})
+                 # Não dar raise, mas logar forte
+            else:
+                 self.logger.log("METADATA_EXTRACT_END", {"format_keys": list(metadata["format"].keys())})
             
             # 3. Análise de GOP (Simplificada)
             self.logger.log("GOP_ANALYSIS_START")
@@ -40,7 +45,7 @@ class FileAnalysisModule:
                 "i_frames": len(i_frames),
                 "p_frames": len(p_frames),
                 "b_frames": len(b_frames),
-                "avg_gop_size": len(gop_frames) / len(i_frames) if i_frames else 0
+                "avg_gop_size": len(gop_frames) / len(i_frames) if i_frames else (len(gop_frames) if gop_frames else 0)
             }
             self.logger.log("GOP_ANALYSIS_END", gop_stats)
             

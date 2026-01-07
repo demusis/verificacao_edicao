@@ -5,3 +5,6 @@ tzdata
 numpy
 scipy
 pyinstaller
+
+opencv-python
+PyWavelets

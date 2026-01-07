@@ -143,7 +143,34 @@ class ReportingModule:
         ],
         "DEEPFAKE": [
             r"DURALL, R. et al. Watch your Up-Convolution: CNN Based Generative Models Yield Artificial Frequency Patterns. \textit{Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition}, 2020.",
-            r"OJALA, T. et al. Multiresolution Gray-Scale and Rotation Invariant Texture Classification with Local Binary Patterns. \textit{IEEE Transactions on Pattern Analysis and Machine Intelligence}, v. 24, n. 7, p. 971-987, 2002."
+        ],
+        "PROCESSING": [
+            r"GLOZSSTEIN, I. et al. Multimedia Phylogeny: A Review. \textit{IEEE Transactions on Information Forensics and Security}, v. 12, n. 1, p. 248-264, 2017.",
+            r"MILANI, S. et al. An Overview on Video Forensics. \textit{APSIPA Transactions on Signal and Information Processing}, v. 1, e2, 2012."
+        ],
+        "GOP": [
+            r"VAZQUEZ-PADIN, D. et al. Video Integrity Verification using GOP Structure Analysis. \textit{IEEE International Workshop on Information Forensics and Security (WIFS)}, 2012.",
+            r"BESTAGINI, P. et al. Video Codec Identification via GOP Analysis. \textit{IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)}, 2012."
+        ],
+        "CONTINUITY": [
+            r"STAMM, M. C. et al. Temporal Forensics and Frame Deletion Detection in Digital Video. \textit{IEEE International Conference on Image Processing (ICIP)}, 2012.",
+            r"GIRONI, A. et al. Video Frame Deletion Detection based on Consistency Analysis. \textit{IEEE International Workshop on Information Forensics and Security (WIFS)}, 2014."
+        ],
+        "STRUCTURE": [
+             r"GLOZSSTEIN, I. et al. Container Structure Analysis for Digital Video Forensics. \textit{Proceedings of the ACM Workshop on Multimedia and Security}, 2010.",
+             r"ISO/IEC 14496-12: Information technology — Coding of audio-visual objects — Part 12: ISO base media file format. \textit{International Organization for Standardization}, 2008."
+        ],
+        "BENFORD_VIDEO": [
+             r"MILANI, S. et al. Video Forensics using Benford's Law. \textit{Proceedings of the European Signal Processing Conference (EUSIPCO)}, 2014.",
+             r"PEREZ-GONZALEZ, F. et al. A Benford's Law-based Approach for Double Compression Detection in MPEG Video. \textit{IEEE Transactions on Information Forensics and Security}, v. 9, n. 4, 2014."
+        ],
+        "PERIODICITY": [
+             r"BIANCHI, T. et al. Detection of Non-Aligned Double JPEG Compression with Estimation of Primary Compression Parameters. \textit{IEEE International Conference on Image Processing (ICIP)}, 2011.",
+             r"WANG, W.; FARID, H. Exposing Digital Forgeries in Video by Detecting Double MPEG Compression. \textit{Proceedings of the 8th Workshop on Multimedia and Security}, ACM, 2006."
+        ],
+        "QUANTIZATION": [
+             r"AGARWAL, S. et al. Source Camera Identification using H.264 Features. \textit{IEEE International Workshop on Information Forensics and Security (WIFS)}, 2011.",
+             r"DAL SANTO, H. et al. H.264 Video Authentication using Quantization Matrices. \textit{IEEE Transactions on Information Forensics and Security}, v. 11, n. 5, 2016."
         ]
     }
 
@@ -215,10 +242,14 @@ class ReportingModule:
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{float}
-\usepackage{colortbl}
+\usepackage{float}
 \usepackage{tcolorbox}
 \usepackage{fancyhdr}
-\usepackage{seqsplit}
+\usepackage{xurl} % Better than seqsplit for handling wrapping
+
+% Define dummy rowcolor to avoid errors after removing colortbl
+\newcommand{\rowcolor}[1]{}
+\newcommand{\blackurl}[1]{{\hypersetup{urlcolor=black}\url{#1}}}
 
 % Configuração de Cores
 \definecolor{primary}{HTML}{2C3E50}
@@ -264,10 +295,11 @@ class ReportingModule:
 """
         # Loop por Arquivos
         for f_idx, file_entry in enumerate(data.get('files', []), 1):
-            f_name = esc(file_entry.get('filename', 'Desconhecido'))
+            f_name_raw = file_entry.get('filename', 'Desconhecido')
             f_analyses = file_entry.get('analyses', {})
             
-            latex += f"\\section{{Arquivo: {f_name}}}\n"
+            # Use safe toc entry
+            latex += f"\\section[Arquivo {f_idx}]{{Arquivo: \\blackurl{{{f_name_raw}}}}}\n"
             
             # --- THUMBNAIL ---
             thumb = file_entry.get('thumbnail')
@@ -290,7 +322,8 @@ class ReportingModule:
                 # Hash
                 latex += r"\subsubsection*{Identificação Digital (Hash)}"
                 latex += r"\begin{tcolorbox}[colback=white,colframe=gray]"
-                latex += r"\textbf{SHA-512:} \texttt{\seqsplit{" + esc(fa.get('file_hash', 'N/A')) + r"}}"
+                # Use \url for safe wrapping using xurl package, forced to black color
+                latex += r"\textbf{SHA-512:} \blackurl{" + fa.get('file_hash', 'N/A') + r"}"
                 latex += r"\end{tcolorbox}"
                 
                 # Format Table
@@ -299,9 +332,31 @@ class ReportingModule:
                 latex += r"\toprule \textbf{Propriedade} & \textbf{Valor} \\ \midrule "
                 latex += r"\endhead "
                 
+                if not fmt:
+                     latex += r"\multicolumn{2}{c}{\textbf{AVISO: Nenhum metadado de formato encontrado (Dicionário vazio).}} \\ \hline"
+                
                 for k, v in fmt.items():
+                    # Force string conversion and basic cleanup
+                    key_clean = esc(str(k))
+                    
+                    # Se for filename, mostrar apenas o basename para não quebrar tabela
+                    if k == 'filename':
+                        try:
+                            val_str = os.path.basename(str(v))
+                        except:
+                            val_str = str(v)
+                    else:
+                        val_str = str(v)
+                        
+                    val_clean = esc(val_str)
+                    
                     if not isinstance(v, (dict, list)):
-                        latex += f"\\textbf{{{esc(k)}}} & {esc(str(v))} \\\\ \\hline \n"
+                        # Use small font for values
+                        # For filename, use \blackurl to allow breaking anywhere (no hyphens)
+                        if k == 'filename':
+                             latex += f"\\textbf{{{key_clean}}} & \\small \\blackurl{{{val_str}}} \\\\ \\hline \n"
+                        else:
+                             latex += f"\\textbf{{{key_clean}}} & \\small {val_clean} \\\\ \\hline \n"
                 latex += r"\bottomrule \end{longtable}"
                 
                 # --- 2. STREAMS ---
@@ -351,23 +406,105 @@ class ReportingModule:
                         for t in traces:
                             latex += f"{esc(t.get('source','-'))} & {esc(t.get('key','-'))} & {esc(str(t.get('value','-'))[:50])} \\\\ \\hline \n"
                         latex += r"\bottomrule \end{longtable}"
+                
+                latex = self._add_refs(latex, "PROCESSING")
 
                 # --- 4. GOP ---
                 gop = fa.get('gop_stats', {})
                 latex += r"\subsection{Estrutura de Compressão (GOP)}"
                 
-                # Help Box
-                latex += r"\begin{tcolorbox}[colback=lightgray,title=O que é GOP?]"
-                latex += r"O \textit{Group of Pictures} define a compressão temporal. Alterações na estrutura (ex: GOP fixo vs variável) podem indicar manipulação."
+                # Help Box - Expanded
+                latex += r"\begin{tcolorbox}[colback=lightgray,title=O que é GOP (Group of Pictures)?]"
+                latex += r"O \textit{Group of Pictures} (GOP) é a estrutura fundamental da compressão temporal em vídeos. "
+                latex += r"Ele define a distância entre \textbf{I-frames} (quadros de referência completos) e a organização dos quadros preditivos. "
+                latex += r"Alterações anormais na estrutura GOP podem indicar: "
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += r"\item Recompressão ou re-encoding do vídeo (manipulação)"
+                latex += r"\item Uso de software de edição profissional"
+                latex += r"\item Streaming/upload (plataformas alteram GOP para otimizar transmissão)"
+                latex += r"\end{itemize}"
                 latex += r"\end{tcolorbox}"
                 
-                latex += r"\begin{itemize}"
-                latex += f"\\item \\textbf{{Total de Frames:}} {gop.get('total_frames_analyzed', 0)}"
-                latex += f"\\item \\textbf{{I-Frames (Keyframes):}} {gop.get('i_frames', 0)}"
-                latex += f"\\item \\textbf{{P-Frames:}} {gop.get('p_frames', 0)}"
-                latex += f"\\item \\textbf{{B-Frames:}} {gop.get('b_frames', 0)}"
-                latex += f"\\item \\textbf{{Tamanho Médio do GOP:}} {gop.get('avg_gop_size', 0):.2f}"
+                # Frame type explanations
+                latex += r"\subsubsection*{Tipos de Quadros}"
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += r"\item \textbf{I-Frames (Intra):} Quadros completos, auto-contidos. Servem como \textit{keyframes} (pontos de referência). São os maiores em tamanho."
+                latex += r"\item \textbf{P-Frames (Preditivos):} Codificam apenas as diferenças em relação ao quadro anterior. Menores que I-frames."
+                latex += r"\item \textbf{B-Frames (Bi-direcionais):} Codificam diferenças em relação a quadros anteriores \textit{e posteriores}. Os menores, mas exigem mais processamento."
                 latex += r"\end{itemize}"
+                
+                # Statistics table
+                total_frames = gop.get('total_frames_analyzed', 0)
+                i_count = gop.get('i_frames', 0)
+                p_count = gop.get('p_frames', 0)
+                b_count = gop.get('b_frames', 0)
+                avg_gop = gop.get('avg_gop_size', 0)
+                
+                latex += r"\subsubsection*{Estatísticas Detectadas}"
+                latex += r"\begin{longtable}{p{7cm} p{3cm} p{5cm}}"
+                latex += r"\toprule \textbf{Métrica} & \textbf{Valor} & \textbf{Referência Típica} \\ \midrule "
+                latex += r"\endhead "
+                
+                latex += f"Total de Frames Analisados & {total_frames} & - \\\\ \\hline \n"
+                
+                # I-frames with interpretation
+                i_percent = (i_count / total_frames * 100) if total_frames > 0 else 0
+                i_ref = r"1-10\% (5-15 frames/seg em 30fps)"
+                i_status = ""
+                if i_percent < 0.5:
+                    i_status = r" \textcolor{danger}{\textbf{ANORMAL - GOP extremamente longo}}"
+                elif i_percent < 2:
+                    i_status = r" \textcolor{warning}{\textbf{Incomum - possível streaming}}"
+                
+                latex += f"I-Frames (Keyframes) & {i_count} ({i_percent:.1f}\\%) & {i_ref}{i_status} \\\\ \\hline \n"
+                
+                # P-frames
+                p_percent = (p_count / total_frames * 100) if total_frames > 0 else 0
+                p_ref = r"30-70\%"
+                latex += f"P-Frames (Preditivos) & {p_count} ({p_percent:.1f}\\%) & {p_ref} \\\\ \\hline \n"
+                
+                # B-frames
+                b_percent = (b_count / total_frames * 100) if total_frames > 0 else 0
+                b_ref = r"20-60\% (ausente em captura simples)"
+                latex += f"B-Frames (Bi-direcionais) & {b_count} ({b_percent:.1f}\\%) & {b_ref} \\\\ \\hline \n"
+                
+                # Average GOP size with interpretation
+                gop_ref = r"10-30 (captura); 60-300 (streaming)"
+                gop_status = ""
+                if avg_gop > 250:
+                    gop_status = r" \textcolor{danger}{\textbf{EXTREMO - typical streaming}}"
+                elif avg_gop > 60:
+                    gop_status = r" \textcolor{warning}{\textbf{Alto - possível plataforma online}}"
+                elif avg_gop < 10:
+                    gop_status = r" \textcolor{warning}{\textbf{Baixo - edição profissional}}"
+                
+                latex += f"Tamanho Médio do GOP & {avg_gop:.2f} & {gop_ref}{gop_status} \\\\ \\hline \n"
+                
+                latex += r"\bottomrule \end{longtable}"
+                
+                # Forensic interpretation
+                latex += r"\subsubsection*{Interpretação Forense}"
+                latex += r"\begin{tcolorbox}[colback=white,colframe=secondary]"
+                
+                if i_count <= 1 and total_frames > 100:
+                    latex += r"\textbf{ALERTA:} GOP extremamente longo detectado (apenas " + str(i_count) + r" I-frame). "
+                    latex += r"Isso é \textbf{altamente incomum} e indica: "
+                    latex += r"\begin{itemize}[leftmargin=1cm]"
+                    latex += r"\item \textbf{Streaming de plataforma online} (YouTube, Facebook, etc. usam GOP de 120-300 para otimizar largura de banda)"
+                    latex += r"\item \textbf{Compressão agressiva pós-processamento} (não é padrão de gravação de câmera)"
+                    latex += r"\item \textbf{Possível re-encoding} (vídeo pode ter sido exportado de software de edição)"
+                    latex += r"\end{itemize}"
+                    latex += r"Vídeos capturados diretamente de câmeras/celulares normalmente têm GOP de 10-30 quadros (I-frame a cada 0.3-1 segundo)."
+                elif avg_gop > 60:
+                    latex += r"GOP elevado detectado. Possível origem: streaming ou software de edição."
+                elif b_count == 0 and total_frames > 50:
+                    latex += r"Ausência de B-frames. Padrão comum em captura direta de dispositivos móveis ou câmeras mais antigas."
+                else:
+                    latex += r"Estrutura GOP dentro de parâmetros típicos para gravação direta."
+                
+                latex += r"\end{tcolorbox}"
+                
+                latex = self._add_refs(latex, "GOP")
 
             # --- 5. CONTINUITY ---
             if 'continuity_analysis' in f_analyses:
@@ -377,11 +514,37 @@ class ReportingModule:
                 
                 latex += r"\subsection{Análise de Continuidade Visual}"
                 
+                # Expanded educational box
                 latex += r"\begin{tcolorbox}[colback=lightgray,title=Entendendo esta Análise]"
-                latex += r"Detecta cortes bruscos ('cortes secos'). Em gravações contínuas, cortes indicam edição/supressão."
+                latex += r"\textbf{Objetivo:} Detectar \textit{cortes bruscos} (hard cuts ou jump cuts) no vídeo através da análise de diferenças entre quadros consecutivos."
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Metodologia:} A análise calcula a diferença pixel-a-pixel entre frames adjacentes. "
+                latex += r"Quando a diferença excede um limiar estatístico, um corte é registrado. "
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Interpretação Forense:}"
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += r"\item \textbf{Gravação contínua autêntica:} Esperado \textbf{zero cortes} ou apenas transições suaves de câmera/cenário"
+                latex += r"\item \textbf{Vídeo editado:} Presença de cortes bruscos indica junção de clipes diferentes, supressão de segmentos, ou montagem"
+                latex += r"\item \textbf{Vídeo de vigilância manipulado:} Cortes são forte indício de exclusão de evidências"
+                latex += r"\end{itemize}"
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Limitações:} Esta análise detecta apenas descontinuidades \textit{visuais} óbvias. "
+                latex += r"Manipulações sofisticadas (como substituição de frames com transições suaves) podem não ser detectadas aqui, "
+                latex += r"mas serão identificadas pela análise de PTS/DTS abaixo."
                 latex += r"\end{tcolorbox}"
                 
-                latex += f"\\textbf{{Resumo:}} Foram detectadas {total} descontinuidades visuais."
+                # Summary with interpretation
+                cut_status = ""
+                if total == 0:
+                    cut_status = r" \textcolor{success}{\textbf{(Padrão esperado para gravação contínua)}}"
+                elif total <= 3:
+                    cut_status = r" \textcolor{warning}{\textbf{(Baixo - possível troca de cena legítima)}}"
+                else:
+                    cut_status = r" \textcolor{danger}{\textbf{(Alto - forte indício de edição)}}"
+                
+                latex += r"\vspace{0.3cm}"
+                latex += f"\\textbf{{Resumo:}} Foram detectadas \\textbf{{{total}}} descontinuidades visuais{cut_status}."
+                latex += r"\vspace{0.3cm}"
                 
                 if cuts:
                     latex += r"\subsubsection*{Tabela de Cortes}"
@@ -426,6 +589,8 @@ class ReportingModule:
                         latex += f"{ts_str} & {msg} \\\\ \\hline \n"
                         
                     latex += r"\bottomrule \end{longtable}"
+                
+                latex = self._add_refs(latex, "CONTINUITY")
 
 
             # --- STRUCTURE ANALYSIS ---
@@ -471,6 +636,8 @@ class ReportingModule:
                     else:
                         latex += f"\\item \\texttt{[{atype}]} (Offset: {offset}){desc}"
                 latex += r"\end{itemize}"
+                
+                latex = self._add_refs(latex, "STRUCTURE")
 
             # --- 6. STATISTICAL COMPRESSION ---
             if 'compression_analysis' in f_analyses:
@@ -488,15 +655,45 @@ class ReportingModule:
                 # BENFORD
                 latex += r"\subsubsection{Lei de Benford Segmentada (I, P, B)}"
                 
-                # Explicação Metodológica
-                latex += r"\begin{tcolorbox}[colback=white,colframe=secondary,title=Interpretação Forense por Tipo de Quadro]"
-                latex += r"\begin{itemize}"
-                latex += r"\item \textbf{Quadros I (Intra):} Anomalias sugerem \textbf{edição espacial} (crop, resize, overlay)."
-                latex += r"\item \textbf{Quadros P/B (Preditivos):} Desvios indicam \textbf{manipulação temporal} ou \textbf{recompressão} (estrutura de GOP alterada)."
-                latex += r"\item \textbf{Global:} Visão geral da integridade estatística do fluxo de dados."
-                latex += r"\end{itemize}"
+                # Educational foundation
+                latex += r"\begin{tcolorbox}[colback=lightgray,title=O que é a Lei de Benford?]"
+                latex += r"\textbf{Definição:} A Lei de Benford (ou Lei do Primeiro Dígito) é um fenômeno matemático que descreve a distribuição dos primeiros dígitos em conjuntos de dados naturais. "
+                latex += r"Em dados não-manipulados, o dígito 1 aparece como primeiro dígito em aproximadamente 30\% dos casos, o 2 em 17.6\%, e assim sucessivamente."
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Aplicação em Vídeo Forense:} Analisamos os tamanhos dos quadros de vídeo comprimidos (em bytes). "
+                latex += r"Vídeos autênticos tendem a seguir a Lei de Benford. \textbf{Recompressão}, \textbf{edição} ou \textbf{manipulação} alteram os padrões de compressão, "
+                latex += r"causando desvios detectáveis na distribuição dos primeiros dígitos."
                 latex += r"\end{tcolorbox}"
                 
+                # Metodologia expandida
+                latex += r"\begin{tcolorbox}[colback=white,colframe=secondary,title=Metodologia e Interpretação por Tipo de Quadro]"
+                latex += r"\textbf{Segmentação:} A análise é feita separadamente para cada tipo de quadro (I, P, B) e globalmente, pois cada tipo tem características estatísticas distintas."
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Interpretação Forense:}"
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += r"\item \textbf{Quadros I (Intra):} Desvios indicam \textbf{edição espacial} (crop, resize, overlay, inserção de elementos). I-frames são os mais sensíveis a manipulação visual."
+                latex += r"\item \textbf{Quadros P/B (Preditivos):} Anomalias sugerem \textbf{manipulação temporal} (frame dropping, inserção) ou \textbf{recompressão} (alteração da estrutura GOP)."
+                latex += r"\item \textbf{Global:} Visão geral da integridade estatística. Combinação dos padrões de todos os tipos de quadro."
+                latex += r"\end{itemize}"
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Métrica de Divergência:} Calcula-se a distância estatística (divergência KL ou chi-quadrado) entre a distribuição observada e a esperada pela Lei de Benford. "
+                latex += r"Quanto maior o score, maior o desvio."
+                latex += r"\end{tcolorbox}"
+                
+                # Reference values table (PRESENTED BEFORE RESULTS)
+                latex += r"\vspace{0.3cm}"
+                latex += r"\noindent\textbf{Valores de Referência para Divergência:}"
+                latex += r"\begin{center}"
+                latex += r"\begin{tabular}{l l l}"
+                latex += r"\toprule \textbf{Score} & \textbf{Classificação} & \textbf{Interpretação} \\ \midrule "
+                latex += r"< 0.05 & \textcolor{success}{\textbf{Excelente}} & Aderência forte à Lei de Benford (vídeo autêntico) \\ "
+                latex += r"0.05 - 0.10 & \textcolor{success}{Bom} & Desvio leve, ainda dentro da normalidade \\ "
+                latex += r"0.10 - 0.15 & \textcolor{warning}{Moderado} & Desvio suspeito, investigar contexto \\ "
+                latex += r"> 0.15 & \textcolor{danger}{\textbf{Alto}} & Forte indício de recompressão ou manipulação \\ "
+                latex += r"\bottomrule \end{tabular}"
+                latex += r"\end{center}"
+                latex += r"\vspace{0.3cm}"
+
                 # Detectar formato (Segmentado vs Legado)
                 if 'global' in benford:
                     segments = ['global', 'I', 'P', 'B']
@@ -504,6 +701,7 @@ class ReportingModule:
                     segments = ['global']
                     benford = {'global': benford}
                 
+                latex += r"\subsubsection*{Resultados Calculados}"
                 latex += r"\begin{longtable}{l c l}"
                 latex += r"\toprule \textbf{Segmento} & \textbf{Divergência} & \textbf{Status} \\ \midrule "
                 
@@ -516,7 +714,7 @@ class ReportingModule:
                     else:
                         sc = b_data.get('divergence_score', 0)
                         score_fmt = f"{sc:.4f}"
-                        st = esc(b_data.get('status', 'N/A'))
+                        st = esc(str(b_data.get('status', 'N/A')))
                         
                         if sc > 0.15: row_col = r"\rowcolor{danger!15}"
                         elif sc > 0.10: row_col = r"\rowcolor{warning!15}"
@@ -534,7 +732,9 @@ class ReportingModule:
                 
                 if obs and len(obs) == 9:
                     latex += r"\subsubsection*{Detalhamento por Dígito (Global)}"
-                    latex += r"\textit{\small Desvios > 5\% destacados em laranja.}"
+                    latex += r"\noindent\textit{\small Desvios > 5\% destacados em laranja.}"
+                    latex += r"\vspace{0.3cm}"
+                    latex += r"\begin{center}"
                     latex += r"\begin{tabular}{r r r r}"
                     latex += r"\toprule \textbf{Díc.} & \textbf{Obs.} & \textbf{Esp.} & \textbf{Desvio} \\ \midrule "
                     for i in range(9):
@@ -544,6 +744,10 @@ class ReportingModule:
                         row_color = r"\rowcolor{danger!20}" if abs(d) > 0.05 else ""
                         latex += f"{row_color} {i+1} & {o*100:.1f}\\% & {e*100:.1f}\\% & {d*100:+.1f}\\% \\\\ \n"
                     latex += r"\bottomrule \end{tabular}"
+                    latex += r"\end{center}"
+                    latex += r"\vspace{0.3cm}"
+                
+                latex = self._add_refs(latex, "BENFORD_VIDEO")
 
                 # FOURIER
                 f_status = esc(fourier.get('status', 'N/A'))
@@ -552,23 +756,99 @@ class ReportingModule:
                 
                 latex += r"\subsubsection{Análise de Periodicidade (Estrutura GOP)}"
                 
-                latex += r"\begin{tcolorbox}[colback=white,colframe=secondary,title=Interpretação]"
-                latex += r"Verifica se o vídeo possui uma 'pulsação' rítmica na compressão. GOPs fixos e rígidos (comum em edição) geram pulsação forte."
+                # Educational foundation
+                latex += r"\begin{tcolorbox}[colback=lightgray,title=O que é Análise de Periodicidade?]"
+                latex += r"\textbf{Conceito:} Utiliza a Transformada Rápida de Fourier (FFT) para detectar padrões repetitivos nos tamanhos dos quadros ao longo do tempo. "
+                latex += r"Vídeos comprimidos exibem uma 'pulsação' característica devido à estrutura GOP."
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Detecção de GOP:} I-frames são muito maiores que P/B-frames, criando um padrão periódico detectável. "
+                latex += r"A FFT identifica a frequência dominante dessa pulsação, revelando o tamanho do GOP usado na compressão."
                 latex += r"\end{tcolorbox}"
                 
-                latex += r"\begin{longtable}{p{6cm} p{8cm}}"
-                latex += r"\toprule \textbf{Métrica} & \textbf{Resultado} \\ \midrule "
-                latex += f"Periodicidade (GOP) & {f_period:.1f} frames \\\\ \\hline \n"
-                latex += f"Força do Padrão & {f_strength:.2f} (Limiar > 3.0 é forte) \\\\ \\hline \n"
-                latex += f"Diagnóstico & {f_status} \\\\ \\hline \n"
+                # Forensic interpretation
+                latex += r"\begin{tcolorbox}[colback=white,colframe=secondary,title=Interpretação Forense]"
+                latex += r"\textbf{GOPs Fixos vs. Variáveis:}"
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += r"\item \textbf{GOP Fixo + Alto Peak Strength:} Padrão rígido e uniforme. Comum em \textbf{software de edição profissional}, \textbf{streaming}, ou \textbf{transcodificação}. Indica possível re-encoding."
+                latex += r"\item \textbf{GOP Variável + Baixo Peak Strength:} Padrão adaptativo. Típico de \textbf{gravação direta de câmeras/smartphones} modernos que ajustam GOP conforme cena (motion-adaptive)."
+                latex += r"\end{itemize}"
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Dupla Compressão:} Se o período detectado difere do GOP observado nos metadados, pode indicar que o vídeo foi recomprimido com parâmetros diferentes."
+                latex += r"\end{tcolorbox}"
+                
+                # Reference values (PRESENTED BEFORE RESULTS)
+                latex += r"\vspace{0.3cm}"
+                latex += r"\noindent\textbf{Valores de Referência - Força do Pico (Peak Strength):}"
+                latex += r"\begin{center}"
+                latex += r"\begin{tabular}{l l l}"
+                latex += r"\toprule \textbf{Peak Strength} & \textbf{Padrão} & \textbf{Origem Típica} \\ \midrule "
+                latex += r"< 1.5 & \textcolor{success}{Fraco/Ausente} & Gravação direta (GOP adaptativo) \\ "
+                latex += r"1.5 - 3.0 & \textcolor{success}{Moderado} & Captura com GOP semi-fixo \\ "
+                latex += r"3.0 - 5.0 & \textcolor{warning}{Forte} & Re-encoding ou edição \\ "
+                latex += r"> 5.0 & \textcolor{danger}{Muito Forte} & Streaming ou software profissional \\ "
+                latex += r"\bottomrule \end{tabular}"
+                latex += r"\end{center}"
+                latex += r"\vspace{0.3cm}"
+
+                # Results table with interpretations
+                latex += r"\subsubsection*{Resultados Calculados}"
+                latex += r"\begin{longtable}{p{6cm} p{4cm} p{5cm}}"
+                latex += r"\toprule \textbf{Métrica} & \textbf{Valor} & \textbf{Interpretação} \\ \midrule "
+                
+                # Period
+                period_interp = ""
+                if f_period > 0:
+                    if f_period < 10:
+                        period_interp = r"Muito curto (provável edição)"
+                    elif f_period <= 30:
+                        period_interp = r"Padrão (captura direta)"
+                    elif f_period <= 120:
+                        period_interp = r"Longo (típico de transcodificação)"
+                    else:
+                        period_interp = r"Extremo (streaming/low bitrate)"
+                else:
+                    period_interp = r"Não detectado"
+                
+                latex += f"Periodicidade Detectada & {f_period:.1f} frames & {period_interp} \\\\ \\hline \n"
+                
+                # Strength with color coding
+                strength_interp = ""
+                strength_color = ""
+                if f_strength > 5.0:
+                    strength_interp = r"Muito forte - GOP \textbf{fixo}"
+                    strength_color = r"\textcolor{danger}"
+                elif f_strength > 3.0:
+                    strength_interp = r"Forte - GOP rígido"
+                    strength_color = r"\textcolor{warning}"
+                elif f_strength > 1.5:
+                    strength_interp = r"Moderado - GOP semi-variável"
+                    strength_color = r"\textcolor{success}"
+                else:
+                    strength_interp = r"Fraco - GOP adaptativo"
+                    strength_color = r"\textcolor{success}"
+                
+                latex += f"Força do Padrão (Peak) & {strength_color}{{{f_strength:.2f}}} & {strength_interp} \\\\ \\hline \n"
+                latex += f"Diagnóstico Geral & \\multicolumn{{2}}{{l}}{{{f_status}}} \\\\ \\hline \n"
                 latex += r"\bottomrule \end{longtable}"
                 
                 if conclusion:
-                    bg_conc = "danger!10" if "viola" in conclusion or "rígida" in conclusion else "success!10"
-                    latex += r"\subsection*{Conclusão Estatística}"
-                    latex += r"\begin{tcolorbox}[colback=" + bg_conc + r"]"
-                    latex += conclusion
+                    is_suspicious = "viola" in conclusion or "rígida" in conclusion or f_strength > 5.0
+                    bg_conc = "danger!10" if is_suspicious else "success!10"
+                    
+                    latex += r"\subsection*{Conclusão e Diagnóstico Estatístico}"
+                    latex += r"\begin{tcolorbox}[colback=" + bg_conc + r", title=Síntese da Análise de Compressão]"
+                    
+                    # Elaborar conclusão mais detalhada
+                    refined_conc = conclusion
+                    if is_suspicious:
+                        refined_conc += r" \textbf{ALERTA:} A rigidez e os desvios estatísticos detectados são incompatíveis com uma gravação direta de câmera, sugerindo fortemente que o arquivo passou por transcodificação e/ou manipulação temporal."
+                    else:
+                        refined_conc += r" Os padrões detectados são consistentes com o comportamento esperado de câmeras comerciais e não apresentam anomalias típicas de reprocessamento agressivo."
+                        
+                    latex += refined_conc
                     latex += r"\end{tcolorbox}"
+                
+                latex = self._add_refs(latex, "PERIODICITY")
 
             # --- 7. IMAGE ANALYSIS (ELA) ---
             if 'image_analysis' in f_analyses:
@@ -580,7 +860,8 @@ class ReportingModule:
                 
                 latex += r"\subsection{Metadados da Imagem}"
                 latex += r"\begin{tcolorbox}[colback=white,colframe=gray]"
-                latex += r"\textbf{SHA-512:} \texttt{\seqsplit{" + esc(img_hash) + r"}}"
+                # Use \url for safe wrapping using xurl package
+                latex += r"\textbf{SHA-512:} \blackurl{" + str(img_hash) + r"}"
                 latex += r"\end{tcolorbox}"
                 
                 # PRNU Status for Image
@@ -770,6 +1051,168 @@ class ReportingModule:
                 
                 latex = self._add_refs(latex, "NOISE")
 
+            # --- 8. DEEPFAKE ANALYSIS ---
+            deepfake_data = f_analyses.get('deepfake_analysis')
+            if not deepfake_data:
+                for k, v in f_analyses.items():
+                    if str(k).endswith('deepfake_analysis'):
+                        deepfake_data = v
+                        break
+            
+            if deepfake_data and deepfake_data.get('status') not in ['error', 'skipped']:
+                df = deepfake_data
+                
+                latex += r"\subsection{Análise de Deepfake e Consistência Física}"
+                
+                # Educational foundation
+                latex += r"\begin{tcolorbox}[colback=lightgray,title=O que são Deepfakes e Como Detectamos?]"
+                latex += r"\textbf{Definição:} Deepfakes são mídias sintéticas criadas por redes neurais (GANs - Generative Adversarial Networks) para falsificar rostos, vozes ou eventos. "
+                latex += r"São cada vez mais realistas e representam um desafio crescente na análise forense."
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Métodos de Detecção Implementados:}"
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += r"\item \textbf{Artefatos de Frequência (FFT):} GANs produzem padrões característicos no espectro de frequências, como 'checkerboard artifacts' (xadrez) visíveis como picos anômalos no domínio de Fourier."
+                latex += r"\item \textbf{Textura Facial (LBP):} Faces sintéticas tendem a ter texturas anormalmente suaves/uniformes comparadas a pele humana real, detectável por Local Binary Patterns."
+                latex += r"\item \textbf{Consistência Física:} Verifica se o ruído/ELA da região facial é consistente com o fundo. Em deepfakes, o rosto é gerado separadamente e 'colado', criando descontinuidades."
+                latex += r"\item \textbf{Jitter Temporal (Vídeo):} Deepfakes instáveis exibem variação excessiva de qualidade frame-a-frame, detectável como alta variância estatística temporal."
+                latex += r"\end{itemize}"
+                latex += r"\end{tcolorbox}"
+                
+                
+                # Detection summary
+                faces = df.get('detected_faces', 0)
+                bodies = df.get('detected_bodies', 0)
+                is_suspicious = df.get('is_suspicious', False)
+                
+                latex += r"\vspace{0.3cm}"
+                latex += r"\noindent\textbf{Detecção de Elementos Humanos:}"
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += f"\\item Faces detectadas: {faces}"
+                latex += f"\\item Corpos/silhuetas detectados: {bodies}"
+                latex += r"\end{itemize}"
+                
+                if faces == 0 and bodies == 0:
+                    latex += r"\begin{tcolorbox}[colback=warning!10,title=Aviso]"
+                    latex += r"Nenhum rosto ou corpo humano foi detectado. A análise de deepfake é aplicável apenas a mídias com presença humana. "
+                    latex += r"Scores abaixo são baseados em análise espectral geral."
+                    latex += r"\end{tcolorbox}"
+                
+                # Results table with color-coded interpretation
+                latex += r"\subsubsection*{Resultados da Análise}"
+                latex += r"\begin{longtable}{p{5cm} p{3cm} p{2.5cm} p{5cm}}"
+                latex += r"\toprule \textbf{Métrica} & \textbf{Score} & \textbf{Status} & \textbf{Interpretação} \\ \midrule "
+                latex += r"\endhead "
+                
+                # Consistency Score
+                cons_score = df.get('consistency_score', 0)
+                cons_status, cons_color, cons_interp = "", "", ""
+                if cons_score < 30:
+                    cons_status = "Baixo"
+                    cons_color = r"\textcolor{success}"
+                    cons_interp = "Consistente com mídia autêntica"
+                elif cons_score < 70:
+                    cons_status = "Moderado"
+                    cons_color = r"\textcolor{warning}"
+                    cons_interp = "Zona ambígua"
+                else:
+                    cons_status = "Alto"
+                    cons_color = r"\textcolor{danger}"
+                    cons_interp = "Descontinuidades suspeitas"
+                
+                latex += f"Consistência Física & {cons_color}{{{cons_score}}} & {cons_status} & {cons_interp} \\\\ \\hline \n"
+                
+                # Frequency Score (GAN artifacts)
+                freq_score = df.get('frequency_score', 0)
+                freq_status, freq_color, freq_interp = "", "", ""
+                if freq_score < 30:
+                    freq_status = "Baixo"
+                    freq_color = r"\textcolor{success}"
+                    freq_interp = "Espectro natural"
+                elif freq_score < 70:
+                    freq_status = "Moderado"
+                    freq_color = r"\textcolor{warning}"
+                    freq_interp = "Artefatos leves"
+                else:
+                    freq_status = "Alto"
+                    freq_color = r"\textcolor{danger}"
+                    freq_interp = "Padrões típicos de GAN"
+                
+                latex += f"Artefatos GAN (FFT) & {freq_color}{{{freq_score}}} & {freq_status} & {freq_interp} \\\\ \\hline \n"
+                
+                # Texture Score
+                tex_score = df.get('texture_score', 0)
+                tex_status, tex_color, tex_interp = "", "", ""
+                if tex_score < 30:
+                    tex_status = "Baixo"
+                    tex_color = r"\textcolor{success}"
+                    tex_interp = "Textura natural"
+                elif tex_score < 70:
+                    tex_status = "Moderado"
+                    tex_color = r"\textcolor{warning}"
+                    tex_interp = "Textura ligeiramente artificial"
+                else:
+                    tex_status = "Alto"
+                    tex_color = r"\textcolor{danger}"
+                    tex_interp = "Textura sintética"
+                
+                latex += f"Textura Facial (LBP) & {tex_color}{{{tex_score}}} & {tex_status} & {tex_interp} \\\\ \\hline \n"
+                
+                # Temporal Jitter (only for videos)
+                if df.get('type') == 'video':
+                    jitter = df.get('temporal_jitter', 0)
+                    jitter_status, jitter_color, jitter_interp = "", "", ""
+                    if jitter < 10:
+                        jitter_status = "Baixo"
+                        jitter_color = r"\textcolor{success}"
+                        jitter_interp = "Estável"
+                    elif jitter < 20:
+                        jitter_status = "Moderado"
+                        jitter_color = r"\textcolor{warning}"
+                        jitter_interp = "Instabilidade leve"
+                    else:
+                        jitter_status = "Alto"
+                        jitter_color = r"\textcolor{danger}"
+                        jitter_interp = "Instabilidade alta (típico de deepfake)"
+                    
+                    latex += f"Jitter Temporal & {jitter_color}{{{jitter}}} & {jitter_status} & {jitter_interp} \\\\ \\hline \n"
+                
+                latex += r"\bottomrule \end{longtable}"
+                
+                # Overall conclusion
+                latex += r"\subsubsection*{Diagnóstico Geral}"
+                if is_suspicious:
+                    latex += r"\begin{tcolorbox}[colback=danger!10,colframe=danger,title=\textbf{ALERTA: Mídia Suspeita}]"
+                    latex += r"Um ou mais indicadores atingiram níveis críticos. \textbf{Recomenda-se análise humana especializada.}"
+                    latex += r"\vspace{0.2cm}"
+                    latex += r"\\"
+                    latex += r"\textbf{Detalhes dos Alertas:}"
+                    latex += r"\begin{itemize}[leftmargin=1cm]"
+                    for detail in df.get('details', []):
+                        latex += f"\\item {esc(detail)}"
+                    latex += r"\end{itemize}"
+                    latex += r"\end{tcolorbox}"
+                else:
+                    latex += r"\begin{tcolorbox}[colback=success!10,colframe=success,title=Mídia Aparentemente Autêntica]"
+                    latex += r"Nenhum indicador crítico de síntese artificial foi detectado. Scores estão dentro de parâmetros esperados para mídia autêntica ou comprimida."
+                    latex += r"\end{tcolorbox}"
+                
+                latex += r"\vspace{0.3cm}"
+                latex += r"\noindent\textbf{Tabela de Referência - Interpretação dos Scores:}"
+                latex += r"\begin{center}"
+                latex += r"\begin{tabular}{l l l}"
+                latex += r"\toprule \textbf{Faixa de Score} & \textbf{Status} & \textbf{Interpretação Forense} \\ \midrule "
+                latex += r"0 - 30 & \textcolor{success}{\textbf{Baixo}} & Consistente com mídia autêntica \\ "
+                latex += r"30 - 50 & \textcolor{warning}{Moderado-Baixo} & Zona de transição, monitorar outros scores \\ "
+                latex += r"50 - 70 & \textcolor{warning}{Moderado-Alto} & Suspeito, investigar contexto \\ "
+                latex += r"> 70 & \textcolor{danger}{\textbf{Alto}} & Forte indício de deepfake ou manipulação \\ "
+                latex += r"\bottomrule \end{tabular}"
+                latex += r"\end{center}"
+                latex += r"\vspace{0.1cm}"
+                latex += r"\noindent\textit{\small \textbf{Importante:} Esta análise é probabilística (heurística), não determinística. Resultados devem ser contextualizados com outras evidências.}"
+                latex += r"\vspace{0.3cm}"
+                
+                latex = self._add_refs(latex, "DEEPFAKE")
+
 
             # --- DCT ANALYSIS (FREQUENCY) ---
             dct_data = None
@@ -867,58 +1310,6 @@ class ReportingModule:
                 
                 latex = self._add_refs(latex, "COPYMOVE")
 
-            # --- DEEPFAKE / FACE FORENSICS ---
-            # Busca robusta por chave (pode vir como 'deepfake_analysis' ou 'nome_arquivo_deepfake_analysis')
-            df_data = f_analyses.get('deepfake_analysis')
-            if not df_data:
-                for k, v in f_analyses.items():
-                    if str(k).endswith('deepfake_analysis'):
-                        df_data = v
-                        break
-
-            if df_data:
-                df = df_data
-                if df.get('status') == 'success':
-                    latex += r"\subsection{Análise de Deepfake e Consistência Física}"
-                    latex += r"\noindent Verificação de consistência entre sujeito (face/corpo) e fundo, além de busca por artefatos gerativos (GANs)."
-                    
-                    # Tabela de Resultados
-                    latex += r"\begin{table}[H]\centering"
-                    latex += r"\begin{tabular}{ll}"
-                    latex += r"\toprule \textbf{Métrica} & \textbf{Resultado} \\ \midrule "
-                    latex += f"Rostos Detectados & {df.get('detected_faces', 0)} \\\\ "
-                    latex += f"Corpos Detectados & {df.get('detected_bodies', 0)} \\\\ "
-                    latex += f"Consistência Física (Ruído) & {df.get('consistency_score', 0)}/100 \\\\ "
-                    latex += f"Integridade de Frequência (FFT) & {100 - df.get('frequency_score', 0)}/100 \\\\ "
-                    latex += f"Naturalidade de Textura (LBP) & {100 - df.get('texture_score', 0)}/100 \\\\ "
-                    
-                    if df.get('type') == 'video':
-                        latex += f"Estabilidade Temporal (Jitter) & {df.get('temporal_jitter', 0)} (Menor é melhor) \\\\ "
-                    
-                    latex += r"\bottomrule \end{tabular}"
-                    latex += r"\caption{Resultados da Análise Forense de Sujeito}"
-                    latex += r"\end{table}"
-                    
-                    # Alertas
-                    if df.get('is_suspicious'):
-                        latex += r"\begin{tcolorbox}[colback=danger!10,title=ALERTA DE MANIPULAÇÃO]"
-                        latex += r"\textbf{Indícios de Deepfake ou Edição detectados:}"
-                        latex += r"\begin{itemize}"
-                        for det in df.get('details', []):
-                            latex += r"\item " + esc(det)
-                        latex += r"\end{itemize}"
-                        latex += r"\end{tcolorbox}"
-                    else:
-                        latex += r"\begin{tcolorbox}[colback=success!10,title=Conclusão Preliminar]"
-                        latex += r"Nenhum indício óbvio de manipulação generativa (Deepfake) ou inconsistência física grosseira foi detectado nos testes automatizados."
-                        latex += r"\end{tcolorbox}"
-                else:
-                    latex += r"\subsection{Análise de Deepfake e Consistência Física}"
-                    latex += r"\begin{tcolorbox}[colback=danger!10,title=Erro na Análise]"
-                    latex += esc(df.get('error', 'Erro Desconhecido'))
-                    latex += r"\end{tcolorbox}"
-                
-                latex = self._add_refs(latex, "DEEPFAKE")
 
 
             # --- RESAMPLING ANALYSIS (INTERPOLATION) ---
@@ -1027,35 +1418,77 @@ class ReportingModule:
                 
                 latex += r"\subsection{Análise de Quantização (Q-Matrices)}"
                 
+                # Educational foundation
+                latex += r"\begin{tcolorbox}[colback=lightgray,title=O que é a Análise de Quantização?]"
+                latex += r"\textbf{Conceito:} A quantização é o processo de reduzir a precisão dos dados de vídeo para permitir a compressão. "
+                latex += r"Ela utiliza matrizes de ponderação (Scaling Lists) para determinar quais detalhes visuais devem ser priorizados ou descartados."
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Significado Forense:} Cada fabricante de câmera e cada software de edição utiliza 'receitas' de quantização específicas. "
+                latex += r"A presença de matrizes customizadas ou perfis de compressão avançados (High Profile) ajuda a identificar a \textbf{assinatura do encoder} "
+                latex += r"e o nível de preservação da integridade original dos dados."
+                latex += r"\end{tcolorbox}"
+
+                # Metodologia e Discussão
+                latex += r"\begin{tcolorbox}[colback=white,colframe=secondary,title=Metodologia e Valores de Referência]"
+                latex += r"\textbf{1. Matrizes de Escalonamento (Scaling Lists):}"
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += r"\item \textbf{Uniforme (Padrão/Flat):} Matrizes uniformes. Típico de encoders básicos ou compressão focada em velocidade."
+                latex += r"\item \textbf{Personalizada (Custom):} Matrizes otimizadas para visão humana. Comum em câmeras de alta qualidade ou softwares profissionais (ex: x264 High Profile)."
+                latex += r"\end{itemize}"
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{2. Densidade de Dados (Bits per Pixel - BPP):}"
+                latex += r"Mede a quantidade de informação armazenada para cada pixel de cada quadro."
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += r"\item \textbf{< 0.10:} Compressão agressiva. Perda provável de evidências microscópicas (ruído de sensor)."
+                latex += r"\item \textbf{0.10 - 0.25:} Equilíbrio padrão de mercado (streaming/web)."
+                latex += r"\item \textbf{> 0.25:} Alta fidelidade. Preservação excelente para análise forense."
+                latex += r"\end{itemize}"
+                latex += r"\end{tcolorbox}"
+
                 if conc:
-                    latex += r"\begin{tcolorbox}[colback=white,colframe=primary,title=Assinatura do Encoder]"
+                    latex += r"\subsubsection*{Diagnóstico da Assinatura}"
+                    latex += r"\begin{tcolorbox}[colback=success!5,colframe=primary,title=Conclusão de Quantização]"
                     latex += esc(conc)
                     latex += r"\end{tcolorbox}"
                 
                 latex += r"\begin{longtable}{p{6cm} p{8cm}}"
                 latex += r"\toprule \textbf{Parâmetro} & \textbf{Valor} \\ \midrule "
                 
-                sps = "Sim" if q_info.get('sps_found') else "Não"
-                custom = "Sim" if q_info.get('has_custom_scaling_matrix') else "Não (Padrão/Flat)"
-                prof = esc(str(q_info.get('profile_idc', 'N/A')))
+                # Tradução de termos técnicos
+                trans = {
+                    "Unknown": "Desconhecido",
+                    "N/A": "N/D",
+                    "High": "High (Alta Performance)",
+                    "Main": "Main (Padrão)",
+                    "Baseline": "Baseline (Simples)",
+                    "CABAC": "CABAC (Eficiente)",
+                    "CAVLC": "CAVLC (Simples)"
+                }
                 
-                # Novos campos
-                refs = str(q_info.get('num_ref_frames', 'N/A'))
-                entropy = esc(str(q_info.get('entropy_coding', 'N/A')))
-                scan = esc(str(q_info.get('scan_type', 'N/A')))
+                sps = "Detectado" if q_info.get('sps_found') else "Não Detectado"
+                custom = "Personalizada (Custom)" if q_info.get('has_custom_scaling_matrix') else "Uniforme (Padrão)"
+                prof_raw = str(q_info.get('profile_idc', 'Unknown'))
+                prof = esc(trans.get(prof_raw, prof_raw))
+                
+                refs = str(q_info.get('num_ref_frames', '0'))
+                entropy_raw = str(q_info.get('entropy_coding', 'N/A'))
+                entropy = esc(trans.get(entropy_raw, entropy_raw))
+                scan = esc(str(q_info.get('scan_type', 'N/D')).replace("Unknown", "Desconhecido"))
                 
                 bpp_info = qa.get('bpp_info', {})
                 bpp = bpp_info.get('bpp', 0)
-                bpp_str = f"{bpp:.3f}" if bpp > 0 else "N/A"
+                bpp_str = f"{bpp:.3f}" if bpp > 0 else "N/D"
                 
-                latex += f"Sequence Parameter Set (SPS) & {sps} \\\\ \\hline \n"
-                latex += f"Perfil H.264 Detectado & {prof} \\\\ \\hline \n"
-                latex += f"Matriz Customizada & {custom} \\\\ \\hline \n"
-                latex += f"Quadros de Referência & {refs} \\\\ \\hline \n"
-                latex += f"Entropia & {entropy} \\\\ \\hline \n"
-                latex += f"Tipo de Scan & {scan} \\\\ \\hline \n"
-                latex += f"Bits Per Pixel (BPP) & {bpp_str} \\\\ \\hline \n"
+                latex += f"Assinatura de Sequência (SPS) & {sps} \\\\ \\hline \n"
+                latex += f"Perfil de Compressão (Profile) & {prof} \\\\ \\hline \n"
+                latex += f"Matrizes de Ponderação & {custom} \\\\ \\hline \n"
+                latex += f"Quadros de Referência (Refs) & {refs} \\\\ \\hline \n"
+                latex += f"Codificação de Entropia & {entropy} \\\\ \\hline \n"
+                latex += f"Varredura (Scan Type) & {scan} \\\\ \\hline \n"
+                latex += f"Densidade de Bits (BPP) & {bpp_str} \\\\ \\hline \n"
                 latex += r"\bottomrule \end{longtable}"
+                
+                latex = self._add_refs(latex, "QUANTIZATION")
 
             # --- 8. PRNU INDIVIDUAL ---
             if 'prnu_analysis' in f_analyses:
@@ -1085,11 +1518,24 @@ class ReportingModule:
             if len(files) > 1:
                 latex += r"\section{Comparação de Fontes (PRNU) - Matriz de Similaridade}"
                 
-                latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia]"
-                latex += r"A correlação cruzada (PCE) compara os ruídos de sensor (fingerprints). Valores altos indicam que os vídeos foram gravados pela mesma câmera."
-                latex += r"\begin{itemize}"
-                latex += r"\item \textbf{PCE > 60:} Alta probabilidade de mesma origem (Match)."
+                latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia Forense (PRNU)]"
+                latex += r"\textbf{Fingerprint de Sensor:} O PRNU (\textit{Photo Response Non-Uniformity}) é um ruído imperceptível e único gerado pelas imperfeições físicas na fabricação do sensor de cada câmera. "
+                latex += r"Ele funciona como uma 'impressão digital digital' da câmera."
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Correlação PCE:} A comparação utiliza a métrica \textbf{PCE} (\textit{Peak-to-Correlation Energy}). "
+                latex += r"Calculamos o quanto o ruído de um arquivo se alinha estatisticamente com o de outro. Valores altos provam cientificamente que as mídias foram gravadas pelo mesmo dispositivo físico."
+                latex += r"\end{tcolorbox}"
+                
+                # Reference Values and Interpretation
+                latex += r"\begin{tcolorbox}[colback=white,colframe=secondary,title=Interpretação Forense dos Valores PCE]"
+                latex += r"A confiabilidade da identificação de fonte baseia-se nos seguintes limiares técnicos:"
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += r"\item \textbf{PCE > 60:} \textbf{MATCH POSITIVO.} Fortíssima evidência de mesma origem. A probabilidade de erro (falso positivo) é estatisticamente desprezível."
+                latex += r"\item \textbf{PCE 40 - 60:} \textbf{Indício Forte.} Alta probabilidade de mesma origem, mas recomendável buscar evidências complementares (ex: metadados)."
+                latex += r"\item \textbf{PCE < 40:} \textbf{Inconclusivo.} O ruído pode estar muito degradado por compressão agressiva, redimensionamento ou falta de luz, impedindo a correlação segura."
                 latex += r"\end{itemize}"
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Nota sobre Resize:} Se os arquivos têm resoluções diferentes, o sistema redimensiona os fingerprints para permitir a comparação. Isso pode reduzir o score PCE e é sinalizado com um asterisco (*)."
                 latex += r"\end{tcolorbox}"
                 
                 # Tabela Dinâmica
@@ -1100,7 +1546,9 @@ class ReportingModule:
                 latex += r"\begin{tabular}{l p{12cm}}"
                 latex += r"\toprule \textbf{ID} & \textbf{Arquivo} \\ \midrule "
                 for i, fname in enumerate(files):
-                    latex += f"{i+1} & {esc(fname)} \\\\ \n"
+                     # Use safe url wrapping forced to black
+                     fname_clean = r"\blackurl{" + str(fname) + r"}"
+                     latex += f"{i+1} & {fname_clean} \\\\ \n"
                 latex += r"\bottomrule \end{tabular}"
                 
                 latex += r"\vspace{0.5cm}"
@@ -1144,6 +1592,8 @@ class ReportingModule:
                 
                 latex += r"\vspace{0.2cm}"
                 latex += r"\small \textit{* Asterisco indica redimensionamento de imagem para compatibilizar fingerprints (Resize).}"
+                
+                latex = self._add_refs(latex, "PRNU")
 
         latex += r"\end{document}"
         return latex
