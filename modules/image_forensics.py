@@ -806,32 +806,52 @@ class ImageForensicsModule:
             return {"status": "error", "error": str(e)}
 
     def _add_colorbar(self, img, colormap=cv2.COLORMAP_JET, label_min="Baixo", label_max="Alto"):
-        """Adiciona uma legenda de escala de cores ao lado da imagem."""
+        """Adiciona uma legenda de escala de cores ao lado da imagem com fundo branco e margens."""
         try:
             h, w = img.shape[:2]
-            colorbar_w = 40
-            padding = 10
-            text_w = 120
             
-            # Criar barra de gradiente
-            bar = np.linspace(255, 0, h).astype(np.uint8).reshape(-1, 1)
-            bar = np.repeat(bar, colorbar_w, axis=1)
-            bar_colored = cv2.applyColorMap(bar, colormap)
+            # Parâmetros de layout
+            bar_w = 30
+            legend_w = 160 # Largura total da área da legenda
+            v_margin = 40  # Margem vertical para o texto não encostar nas bordas
+            h_margin = 15  # Distância do texto para a barra
             
-            # Canvas da legenda
-            legend = np.zeros((h, colorbar_w + text_w, 3), dtype=np.uint8)
-            legend[:, :colorbar_w] = bar_colored
+            # 1. Canvas da legenda (Fundo Branco)
+            legend = np.full((h, legend_w, 3), 255, dtype=np.uint8)
             
-            # Add labels
+            # 2. Criar barra de gradiente vertical (centralizada verticalmente)
+            bar_h = h - (2 * v_margin)
+            if bar_h <= 0: bar_h = h # fallback para imagens muito pequenas
+            
+            bar_pixels = np.linspace(255, 0, bar_h).astype(np.uint8).reshape(-1, 1)
+            bar_pixels = np.repeat(bar_pixels, bar_w, axis=1)
+            bar_colored = cv2.applyColorMap(bar_pixels, colormap)
+            
+            # Inserir barra no canvas (offset vertical)
+            y_start = (h - bar_h) // 2
+            legend[y_start:y_start+bar_h, 10:10+bar_w] = bar_colored
+            
+            # Borda fina ao redor da barra
+            cv2.rectangle(legend, (10, y_start), (10+bar_w, y_start+bar_h), (180, 180, 180), 1)
+            
+            # 3. Adicionar Rótulos (Texto em Preto)
             font = cv2.FONT_HERSHEY_SIMPLEX
-            # Adjust font scale based on height
-            f_scale = max(0.4, h / 1000.0)
-            thickness = 1 if h < 1000 else 2
+            # Escala dinâmica baseada na altura da imagem
+            f_scale = max(0.4, min(1.2, h / 800.0))
+            thickness = 1 if f_scale < 0.8 else 2
+            color = (40, 40, 40) # Cinza muito escuro (melhor que preto puro)
             
-            cv2.putText(legend, label_max, (colorbar_w + 5, 30), font, f_scale, (255, 255, 255), thickness)
-            cv2.putText(legend, label_min, (colorbar_w + 5, h - 20), font, f_scale, (255, 255, 255), thickness)
+            # Texto Máximo (Topo)
+            cv2.putText(legend, str(label_max), (10 + bar_w + h_margin, y_start + 15), 
+                        font, f_scale, color, thickness, cv2.LINE_AA)
             
+            # Texto Mínimo (Base)
+            cv2.putText(legend, str(label_min), (10 + bar_w + h_margin, y_start + bar_h - 5), 
+                        font, f_scale, color, thickness, cv2.LINE_AA)
+            
+            # Combinar com a imagem original
             combined = np.hstack((img, legend))
             return combined
-        except:
+        except Exception:
+            # Fallback seguro para não quebrar a análise se algo falhar no desenho
             return img
