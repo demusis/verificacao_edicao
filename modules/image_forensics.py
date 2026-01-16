@@ -101,11 +101,14 @@ class ImageForensicsModule:
             if img is None:
                 return {"status": "failed", "error": "Cannot read image"}
 
-            # Se a imagem não for salva com compressão com perdas (ex: PNG), 
-            # a análise ainda é válida para saber se VEIO de um JPEG.
+            # JPEG Ghosts / Double Compression Analysis
+            # Baseado em Farid (2009): "Exposing Digital Forgeries From JPEG Ghosts".
+            # O princípio é que se uma imagem foi comprimida em uma qualidade Q1 e depois 
+            # re-salva em Q2, a diferença entre a imagem re-salva e versões originais terá 
+            # um 'mínimo local' (dip) no ponto Q1.
             
             # 1. Sweep de Qualidade (60 a 99)
-            # Recomprimir e medir erro.
+            # Recomprimir a imagem em diversos graus e medir o erro residual.
             qualities = list(range(60, 100))
             errors = []
             
@@ -130,6 +133,10 @@ class ImageForensicsModule:
                 # Ler
                 # Usar imread direto aqui pois save é local e limpo
                 recompressed = cv2.imread(temp_path)
+                
+                # Verificar se leitura foi bem sucedida
+                if recompressed is None or recompressed.shape != small_img.shape:
+                    continue  # Skipar esta qualidade se falhar
                 
                 # Calcular Diferença (Diferença absoluta média por canal)
                 diff = cv2.absdiff(small_img, recompressed)
@@ -163,24 +170,24 @@ class ImageForensicsModule:
             primary_q = 0
             
             if len(minima) > 0:
-                # Assumimos que o maior Q é o atual (aproximadamente)
-                current_q_est = max(minima)
+                # O Fator Q (Quality) escala as matrizes de quantização JPEG (1-100).
+                # Um mínimo detectado em Q63 indica que a imagem possui assinaturas 
+                # de quantização de um salvamento anterior nesta qualidade específica.
                 
-                # Se tiver outro min significativo, é double
-                # Filtrar minimos muito proximos
-                valid_minima = [m for m in minima if m < 95] # Ignore very high default
+                current_q_est = max(minima)
+                valid_minima = [m for m in minima if m < 95] 
                 
                 if len(valid_minima) > 1:
                     is_double = True
-                    primary_q = valid_minima[0] # O menor/primeiro
-                    conclusion = f"Alta probabilidade de Dupla Compressão. Qualidade original estimada: Q{primary_q}."
+                    primary_q = valid_minima[0] # Provável qualidade original
+                    conclusion = f"Alta probabilidade de Dupla Compressão. Qualidade Original Estimada: Q{primary_q}. (Indica que a imagem foi editada/re-salva após este ponto)."
                 elif len(valid_minima) == 1:
                      primary_q = valid_minima[0]
-                     conclusion = f"Compressão Simples detectada. Qualidade estimada: Q{primary_q}."
+                     conclusion = f"Compressão Simples detectada. Qualidade atual estimada: Q{primary_q}."
                 else:
-                     conclusion = "Padrão de compressão inconclusivo (possível PNG/Lossless ou Q muito alta)."
+                     conclusion = "Padrão de compressão inconclusivo. Q elevado (>95) ou formato original sem perda (PNG/TIFF)."
             else:
-                conclusion = "Nenhum padrão de compressão claro (Gráfico monotônico)."
+                conclusion = "Nenhum padrão de compressão múltipla claro. Gráfico de erro monotônico."
 
             # 3. Gerar Mapa de Ghosts (NAg - Noise Artifacts of ghosts)
             # Diferença entre Imagem e JPEG Quality(Primary)
@@ -193,6 +200,10 @@ class ImageForensicsModule:
             recomp_full = cv2.imread(temp_path_full)
             if os.path.exists(temp_path_full): os.remove(temp_path_full)
             
+            # Verificar se leitura foi bem sucedida
+            if recomp_full is None or recomp_full.shape != img.shape:
+                return {"status": "error", "error": "Failed to read recompressed image for ghost map."}
+            
             # Mapa de Diferença Médio (Ghost Map)
             diff_full = cv2.absdiff(img, recomp_full)
             # Converter p/ grayscale média
@@ -203,10 +214,11 @@ class ImageForensicsModule:
             diff_blur = cv2.GaussianBlur(diff_gray, (7,7), 0)
             norm_ghost = cv2.normalize(diff_blur, None, 0, 255, cv2.NORM_MINMAX)
             heatmap = cv2.applyColorMap(norm_ghost.astype(np.uint8), cv2.COLORMAP_JET)
+            heatmap_with_legend = self._add_colorbar(heatmap, cv2.COLORMAP_JET, "Baixo Erro", "Alto Erro")
             
             ghost_filename = f"{input_file.stem}_ghost_map_q{target_q}.jpg"
             ghost_path = self.cm.results_dir / ghost_filename
-            self._write_image_safe(ghost_path, heatmap)
+            self._write_image_safe(ghost_path, heatmap_with_legend)
 
             return {
                 "status": "success",
@@ -291,10 +303,11 @@ class ImageForensicsModule:
             # Vamos saturar em 30 para visualização
             vis_map = np.clip(prob_map * (255.0/30.0), 0, 255).astype(np.uint8)
             heatmap = cv2.applyColorMap(vis_map, cv2.COLORMAP_JET)
+            heatmap_with_legend = self._add_colorbar(heatmap, cv2.COLORMAP_JET, "Normal", "Resampled")
             
             res_filename = f"{input_file.stem}_resampling_map.jpg"
             res_path = self.cm.results_dir / res_filename
-            self._write_image_safe(res_path, heatmap)
+            self._write_image_safe(res_path, heatmap_with_legend)
             
             # Conclusão
             conc = "Baixa probabilidade de resampling detectada."
@@ -338,24 +351,33 @@ class ImageForensicsModule:
             if descriptors is None or len(keypoints) < 5:
                 return {"status": "insufficient_features", "matches_found": 0}
             
-            # 2. Matching (Brute Force KNN)
+            # 2. Matching (Brute Force KNN) com Lowe's Ratio Test
+            # Como casamos descriptors contra SI MESMOS, o melhor match (k=0) é o próprio ponto (dist=0).
+            # Precisamos do 2º e 3º melhores matches para o ratio test.
             bf = cv2.BFMatcher()
-            matches = bf.knnMatch(descriptors, descriptors, k=10) 
+            matches = bf.knnMatch(descriptors, descriptors, k=3) 
             
             initial_matches = []
             min_dist_spatial = 50.0 
+            ratio_threshold = 0.75 # Lowe's Ratio Test (típico 0.7 a 0.8)
             
             for m_list in matches:
-                for m in m_list:
-                    if m.queryIdx == m.trainIdx: continue 
-                    
-                    p1 = keypoints[m.queryIdx].pt
-                    p2 = keypoints[m.trainIdx].pt
+                if len(m_list) < 3: continue
+                
+                # m_list[0] = auto-match (dist 0)
+                # m_list[1] = melhor candidato
+                # m_list[2] = segundo melhor candidato
+                m1 = m_list[1]
+                m2 = m_list[2]
+                
+                if m1.distance < ratio_threshold * m2.distance:
+                    p1 = keypoints[m1.queryIdx].pt
+                    p2 = keypoints[m1.trainIdx].pt
                     dist_spatial = np.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)
                     
-                    # Stricter descriptor distance (typ 0-500, 150 is loose, try 100)
-                    if dist_spatial > min_dist_spatial and m.distance < 120:
-                         initial_matches.append(m)
+                    # Filtro de distância espacial e descritora absoluta
+                    if dist_spatial > min_dist_spatial and m1.distance < 110:
+                         initial_matches.append(m1)
 
             # 3. Filtragem por Coerência (Clustering de Vetores)
             # Uma cópia real terá vários keypoints se movendo na mesma direção e distância.
@@ -387,7 +409,7 @@ class ImageForensicsModule:
                     if i in used_indices: continue
                     
                     v_ref = vectors[i]
-                    cluster = [v_ref]
+                    cluster_indices = [i]
                     
                     for j in range(i+1, len(vectors)):
                         if j in used_indices: continue
@@ -401,14 +423,15 @@ class ImageForensicsModule:
                         # Diff Comprimento
                         len_ratio = abs(v_ref['len'] - v_test['len']) / (v_ref['len'] + 1e-6)
                         
-                        if diff_ang < 0.2 and len_ratio < 0.15:
-                            cluster.append(v_test)
+                        # Tolerâncias mais estritas (0.15 rad ~ 8 graus)
+                        if diff_ang < 0.15 and len_ratio < 0.12:
+                            cluster_indices.append(j)
                             
                     # Se cluster for grande o suficiente, aceita todos
-                    if len(cluster) >= min_cluster_size:
-                        for item in cluster:
-                            final_selection.append(item['m'])
-                            # Marcar indices como usados (simplificação, ideal seria não marcar para permitir overlaps, mas evita duplicatas)
+                    if len(cluster_indices) >= min_cluster_size:
+                        for idx in cluster_indices:
+                            final_selection.append(vectors[idx]['m'])
+                            used_indices.add(idx)
                             
                 unique_matches = []
                 seen_pairs = set()
@@ -439,7 +462,7 @@ class ImageForensicsModule:
             
             # Conclusão
             conc = "Nenhuma duplicação óbvia detectada."
-            if count > 10:
+            if count >= 15:
                 conc = f"ALTO RISCO: {count} pares de regiões idênticas detectadas. Possível clonagem."
             elif count > 0:
                 conc = f"Atenção: {count} pares suspeitos encontrados. Verifique padrões repetitivos."
@@ -511,11 +534,12 @@ class ImageForensicsModule:
             # Resize para tamanho original para visualização
             dct_vis = cv2.resize(norm_map_uint8, (w, h), interpolation=cv2.INTER_NEAREST)
             dct_heatmap = cv2.applyColorMap(dct_vis, cv2.COLORMAP_INFERNO)
+            dct_with_legend = self._add_colorbar(dct_heatmap, cv2.COLORMAP_INFERNO, "Baixa Freq", "Alta Freq")
             
             # Salvar
             dct_filename = f"{input_file.stem}_dct_map.jpg"
             dct_path = self.cm.results_dir / dct_filename
-            self._write_image_safe(dct_path, dct_heatmap)
+            self._write_image_safe(dct_path, dct_with_legend)
             
             return {
                 "status": "success",
@@ -553,10 +577,12 @@ class ImageForensicsModule:
             
             # Estatísticas por Bloco
             block_stats = []
-            map_vis = np.zeros((h, w), dtype=np.uint8)
+            # Mapa de variâncias em float para normalização posterior
+            map_float = np.zeros((h, w), dtype=np.float32)
             
             variances = []
             entropies = []
+            std_values = []
             
             # Iterar blocos
             for y in range(0, h, block_size):
@@ -575,6 +601,7 @@ class ImageForensicsModule:
                     
                     variances.append(var)
                     entropies.append(ent)
+                    std_values.append(std)
                     
                     block_stats.append({
                         "x": x, "y": y,
@@ -583,15 +610,12 @@ class ImageForensicsModule:
                         "entropy": float(ent)
                     })
                     
-                    # Preencher visualização (Normalizado pela variância local)
-                    # Vamos preencher o bloco no mapa visual com um valor representativo (std dev escalado)
-                    # Cap visual em 255
-                    vis_val = min(int(std * 10), 255) 
-                    map_vis[y:y_end, x:x_end] = vis_val
+                    # Preencher mapa float com valor de std (será normalizado depois)
+                    map_float[y:y_end, x:x_end] = std
 
             # Análise Global e Outliers
-            global_var_mean = np.mean(variances)
-            global_var_std = np.std(variances)
+            global_var_mean = np.mean(variances) if variances else 0
+            global_var_std = np.std(variances) if variances else 0
             
             outliers = []
             threshold_z = 3.0 # Limite de desvios padrão para considerar anomalia
@@ -601,13 +625,28 @@ class ImageForensicsModule:
                 if abs(z_score) > threshold_z:
                     outliers.append(b)
             
+            # Normalizar mapa para 0-255 usando min-max (usa range completo da imagem)
+            # Isso garante que QUALQUER diferença seja visível, mesmo em imagens de baixo ruído
+            min_val = np.min(map_float)
+            max_val = np.max(map_float)
+            
+            if max_val - min_val > 1e-6:
+                # Normalização min-max para ocupar todo o range visual
+                map_normalized = ((map_float - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+            else:
+                # Imagem completamente uniforme (sem variação de ruído)
+                map_normalized = np.full((h, w), 128, dtype=np.uint8)
+            
             # Gerar Mapa de Calor Colorido (JET)
-            heatmap_color = cv2.applyColorMap(map_vis, cv2.COLORMAP_JET)
+            heatmap_color = cv2.applyColorMap(map_normalized, cv2.COLORMAP_JET)
+            
+            # Adicionar escala de cores (Legenda)
+            heatmap_with_legend = self._add_colorbar(heatmap_color, cv2.COLORMAP_JET, "Ruido Baixo", "Ruido Alto")
             
             # Salvar Mapa
             map_filename = f"{input_file.stem}_noise_map.jpg"
             map_path = self.cm.results_dir / map_filename
-            self._write_image_safe(map_path, heatmap_color)
+            self._write_image_safe(map_path, heatmap_with_legend)
             
             return {
                 "status": "success",
@@ -660,27 +699,59 @@ class ImageForensicsModule:
             return False
 
     def _perform_ela(self, input_file: Path) -> dict:
-        """Gera imagem ELA (Error Level Analysis) comparando com compressão JPEG."""
+        """
+        Gera imagem ELA (Error Level Analysis) comparando com compressão JPEG.
+        
+        Princípio Científico:
+        O ELA identifica áreas da imagem com diferentes níveis de compressão. Imagens digitais
+        não manipuladas tendem a atingir um "estado estável" (steady state) onde a recompressão
+        em uma qualidade similar gera um erro uniforme. Edições posteriores "resetam" esse estado,
+        fazendo com que regiões manipuladas apresentem níveis de erro distintos do restante.
+        
+        Referências:
+        - Krawetz, N. (2007). "A Picture's Worth: Digital Image Analysis and Forensics".
+        - Farid, H. (2009). "Exposing Digital ForgeriesFrom JPEG Ghosts".
+        """
         try:
             # Ler imagem original
             orig = self._read_image_safe(input_file)
             if orig is None:
                 return {"status": "failed", "error": f"Cannot read image: {input_file.name}"}
             
-            # Caminho temp para recompressão
-            temp_jpg = self.cm.results_dir / f"temp_ela_{input_file.stem}.jpg"
+            # Caminho temp para recompressão - usar diretório temporário do sistema para evitar problemas de path
+            import tempfile
+            temp_dir = tempfile.gettempdir()
+            # Usar nome simples sem caracteres especiais
+            temp_jpg_path = Path(temp_dir) / f"ela_temp_{id(self)}.jpg"
             
             # Salvar com compressão JPEG (Qualidade 90-95 é padrão para ELA)
-            self._write_image_safe(temp_jpg, orig, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            write_success = self._write_image_safe(temp_jpg_path, orig, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            
+            if not write_success:
+                return {"status": "error", "error": f"Failed to write temp JPEG for ELA to {temp_jpg_path}"}
+            
+            # Verificar se arquivo foi criado
+            if not temp_jpg_path.exists():
+                return {"status": "error", "error": f"Temp JPEG was not created at {temp_jpg_path}"}
             
             # Ler imagem recomprimida
-            compressed = self._read_image_safe(temp_jpg)
+            compressed = self._read_image_safe(temp_jpg_path)
+            
+            # Verificar se leitura foi bem sucedida
+            if compressed is None:
+                temp_jpg_path.unlink(missing_ok=True)
+                return {"status": "error", "error": f"Failed to read recompressed JPEG for ELA from {temp_jpg_path}"}
+            
+            # Verificar se dimensões são compatíveis
+            if compressed.shape != orig.shape:
+                temp_jpg_path.unlink(missing_ok=True)
+                return {"status": "error", "error": f"Dimension mismatch: original {orig.shape} vs compressed {compressed.shape}"}
             
             # Calcular diferença absoluta (Ruído de compressão perdido)
             diff = cv2.absdiff(orig, compressed)
             
             # Remover temp
-            temp_jpg.unlink(missing_ok=True)
+            temp_jpg_path.unlink(missing_ok=True)
             
             # Amplificar a diferença para visualização (Scale)
             # Valor típico: multiplicar por 10 ou 20.
@@ -700,8 +771,9 @@ class ImageForensicsModule:
             else:
                 ela_display = np.clip(ela_image, 0, 255).astype(np.uint8)
             
-            # Métrica com base no erro absoluto ORIGINAL (sem normalização visual)
-            # Isso é importante para comparar qualidade real.
+            # Métrica: Score de Diferença Global (Global Difference Score)
+            # Representa o Erro Médio Absoluto (MAE) por pixel/canal.
+            # Baseado em Lin et al. (2009), este valor quantifica a degradação acumulada.
             ela_score = np.mean(diff_float)
             
             # Salvar imagem ELA (Mapa de Calor Visual)
@@ -709,14 +781,18 @@ class ImageForensicsModule:
             ela_path = self.cm.results_dir / ela_filename
             self._write_image_safe(ela_path, ela_display)
             
-            # Interpretação Dinâmica
-            interpretation = "Resultados ELA: "
+            # Interpretação Dinâmica (Baseada em parâmetros forenses)
+            interpretation = "Interpretando Score de Diferença Global (MAE): "
             if ela_score < 2.0:
-                interpretation += f"Erro médio muito baixo ({ela_score:.2f}). Imagem de alta qualidade ou salva com compressão mínima. O mapa de calor foi amplificado para revelar padrões sutis."
-            elif ela_score > 10.0:
-                interpretation += f"Erro médio alto ({ela_score:.2f}). Imagem com muita compressão ou re-salvamentos múltiplos."
+                interpretation += f"Erro muito baixo ({ela_score:.2f}). Imagem de alta qualidade ou salva no 'steady state' (Q95-100). Pequenas heterogeneidades podem ser ruído natural."
+            elif ela_score < 5.0:
+                interpretation += f"Faixa típica ({ela_score:.2f}). Comportamento esperado para imagens JPEG originais (Q80-95). Verifique inconsistências locais."
+            elif ela_score <= 10.0:
+                interpretation += f"Erro elevado ({ela_score:.2f}). Indica compressão moderada ou duplo salvamento. Regiões de alta frequência (bordas) tendem a brilhar mais."
             else:
-                interpretation += f"Nível de erro padrão ({ela_score:.2f}). Verifique regiões brilhantes que destoam do fundo."
+                interpretation += f"Erro crítico ({ela_score:.2f}). Imagem com compressão agressiva ou múltiplos ciclos de re-processamento (geração profunda)."
+            
+            interpretation += "\nNOTA: Foque na heterogeneidade espacial: regiões manipuladas brilham de forma diferente do fundo original."
             
             return {
                 "status": "success",
@@ -728,3 +804,34 @@ class ImageForensicsModule:
             
         except Exception as e:
             return {"status": "error", "error": str(e)}
+
+    def _add_colorbar(self, img, colormap=cv2.COLORMAP_JET, label_min="Baixo", label_max="Alto"):
+        """Adiciona uma legenda de escala de cores ao lado da imagem."""
+        try:
+            h, w = img.shape[:2]
+            colorbar_w = 40
+            padding = 10
+            text_w = 120
+            
+            # Criar barra de gradiente
+            bar = np.linspace(255, 0, h).astype(np.uint8).reshape(-1, 1)
+            bar = np.repeat(bar, colorbar_w, axis=1)
+            bar_colored = cv2.applyColorMap(bar, colormap)
+            
+            # Canvas da legenda
+            legend = np.zeros((h, colorbar_w + text_w, 3), dtype=np.uint8)
+            legend[:, :colorbar_w] = bar_colored
+            
+            # Add labels
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            # Adjust font scale based on height
+            f_scale = max(0.4, h / 1000.0)
+            thickness = 1 if h < 1000 else 2
+            
+            cv2.putText(legend, label_max, (colorbar_w + 5, 30), font, f_scale, (255, 255, 255), thickness)
+            cv2.putText(legend, label_min, (colorbar_w + 5, h - 20), font, f_scale, (255, 255, 255), thickness)
+            
+            combined = np.hstack((img, legend))
+            return combined
+        except:
+            return img
