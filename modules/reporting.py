@@ -192,7 +192,7 @@ class ReportingModule:
         refs = self.REFERENCES_DB.get(key)
         if not refs: return latex
         
-        latex += r"\vspace{0.3cm}"
+        latex += r"\par\vspace{0.3cm}"
         latex += r"\noindent \textbf{\footnotesize Referências do Procedimento:}"
         latex += r"\begin{itemize}[leftmargin=*,noitemsep]"
         for r in refs[:5]: # Max 5
