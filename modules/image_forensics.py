@@ -765,25 +765,31 @@ class ImageForensicsModule:
             # Amplificação Base
             ela_image = diff_float * 15.0 
             
-            # Auto-Brightness para Visualização
-            # Se a imagem for muito escura (alta qualidade), normalizamos para tornar o padrão visível.
-            max_val = np.max(ela_image)
-            if max_val > 0 and max_val < 255:
-                # Escalar para ocupar o range 0-255 (Dynamic Range Compression)
-                ela_display = (ela_image / max_val) * 255.0
-                ela_display = ela_display.astype(np.uint8)
-            else:
-                ela_display = np.clip(ela_image, 0, 255).astype(np.uint8)
-            
             # Métrica: Score de Diferença Global (Global Difference Score)
             # Representa o Erro Médio Absoluto (MAE) por pixel/canal.
-            # Baseado em Lin et al. (2009), este valor quantifica a degradação acumulada.
             ela_score = np.mean(diff_float)
+            
+            # --- NOVIDADE: Gerar Mapa de Calor (JET) para consistência visual ---
+            # Converter diferença BGR para média de intensidade
+            ela_gray = np.mean(diff_float, axis=2).astype(np.float32)
+            
+            # Normalização para visualização
+            max_err = np.max(ela_gray)
+            if max_err > 1e-6:
+                ela_norm = (ela_gray / max_err * 255).astype(np.uint8)
+            else:
+                ela_norm = np.zeros_like(ela_gray, dtype=np.uint8)
+                
+            ela_heatmap = cv2.applyColorMap(ela_norm, cv2.COLORMAP_JET)
+            
+            # Adicionar Legenda
+            # val_max é o erro absoluto máximo encontrado
+            ela_with_legend = self._add_colorbar(ela_heatmap, cv2.COLORMAP_JET, "Erro Local Baixo", "Erro Local Alto", 0.0, float(max_err))
             
             # Salvar imagem ELA (Mapa de Calor Visual)
             ela_filename = f"{input_file.stem}_ela_heatmap.jpg"
             ela_path = self.cm.results_dir / ela_filename
-            self._write_image_safe(ela_path, ela_display)
+            self._write_image_safe(ela_path, ela_with_legend)
             
             # Interpretação Dinâmica (Baseada em parâmetros forenses)
             interpretation = "Interpretando Score de Diferença Global (MAE): "
@@ -811,7 +817,6 @@ class ImageForensicsModule:
 
     def _add_colorbar(self, img, colormap=cv2.COLORMAP_JET, label_min="Baixo", label_max="Alto", val_min=None, val_max=None):
         """Adiciona uma legenda com valores numéricos, largura dinâmica e posicionamento preciso."""
-        print(f"[DEBUG] _add_colorbar: {label_min}={val_min}, {label_max}={val_max}")
         try:
             h, w = img.shape[:2]
             
