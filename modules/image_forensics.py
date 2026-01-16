@@ -810,36 +810,10 @@ class ImageForensicsModule:
             return {"status": "error", "error": str(e)}
 
     def _add_colorbar(self, img, colormap=cv2.COLORMAP_JET, label_min="Baixo", label_max="Alto", val_min=None, val_max=None):
-        """Adiciona uma legenda com valores numéricos."""
+        """Adiciona uma legenda com valores numéricos, largura dinâmica e posicionamento preciso."""
+        print(f"[DEBUG] _add_colorbar: {label_min}={val_min}, {label_max}={val_max}")
         try:
             h, w = img.shape[:2]
-            
-            # Parâmetros de layout
-            bar_w = 30
-            legend_w = 200 # Aumentado para caber números
-            v_margin = 40
-            h_margin = 15
-            
-            # 1. Canvas da legenda (Fundo Branco)
-            legend = np.full((h, legend_w, 3), 255, dtype=np.uint8)
-            
-            # 2. Criar barra de gradiente vertical
-            bar_h = h - (2 * v_margin)
-            if bar_h <= 0: bar_h = h
-            
-            bar_pixels = np.linspace(255, 0, bar_h).astype(np.uint8).reshape(-1, 1)
-            bar_pixels = np.repeat(bar_pixels, bar_w, axis=1)
-            bar_colored = cv2.applyColorMap(bar_pixels, colormap)
-            
-            y_start = (h - bar_h) // 2
-            legend[y_start:y_start+bar_h, 10:10+bar_w] = bar_colored
-            cv2.rectangle(legend, (10, y_start), (10+bar_w, y_start+bar_h), (180, 180, 180), 1)
-            
-            # 3. Adicionar Rótulos e Valores
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            f_scale = max(0.4, min(1.0, h / 800.0))
-            thickness = 1 if f_scale < 0.8 else 2
-            color = (40, 40, 40)
             
             # Formatar labels com valores se existirem
             txt_max = str(label_max)
@@ -848,12 +822,53 @@ class ImageForensicsModule:
                 txt_max += f" ({val_max:.1f})"
             if val_min is not None:
                 txt_min += f" ({val_min:.1f})"
-
-            cv2.putText(legend, txt_max, (10 + bar_w + h_margin, y_start + 15), 
-                        font, f_scale, color, thickness, cv2.LINE_AA)
-            cv2.putText(legend, txt_min, (10 + bar_w + h_margin, y_start + bar_h - 5), 
+                
+            # Parâmetros de layout base
+            bar_w = 30
+            v_margin = 50
+            h_margin = 15
+            left_offset = 15
+            
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            # Escala dinâmica baseada na altura da imagem
+            f_scale = max(0.4, min(1.0, h / 900.0))
+            thickness = 1 if f_scale < 0.8 else 2
+            color = (30, 30, 30) # Cinza escuro
+            
+            # 1. Calcular tamanho necessário para o texto
+            size_max, baseline_max = cv2.getTextSize(txt_max, font, f_scale, thickness)
+            size_min, baseline_min = cv2.getTextSize(txt_min, font, f_scale, thickness)
+            
+            # Largura da legenda: margem esq + barra + gap + texto + margem dir
+            max_text_w = max(size_max[0], size_min[0])
+            legend_w = left_offset + bar_w + h_margin + max_text_w + 20
+            
+            # 2. Canvas da legenda (Fundo Branco)
+            legend = np.full((h, int(legend_w), 3), 255, dtype=np.uint8)
+            
+            # 3. Barra de cores
+            bar_h = h - (2 * v_margin)
+            if bar_h <= 0: bar_h = h
+            
+            bar_pixels = np.linspace(255, 0, bar_h).astype(np.uint8).reshape(-1, 1)
+            bar_pixels = np.repeat(bar_pixels, bar_w, axis=1)
+            bar_colored = cv2.applyColorMap(bar_pixels, colormap)
+            
+            y_start = (h - bar_h) // 2
+            legend[y_start:y_start+bar_h, left_offset:left_offset+bar_w] = bar_colored
+            cv2.rectangle(legend, (left_offset, y_start), (left_offset+bar_w, y_start+bar_h), (180, 180, 180), 1)
+            
+            # 4. Desenhar Rótulos
+            # Topo: Baseado em y_start + tamanho do texto para não cortar o topo
+            text_x = left_offset + bar_w + h_margin
+            cv2.putText(legend, txt_max, (text_x, y_start + size_max[1] // 2), 
                         font, f_scale, color, thickness, cv2.LINE_AA)
             
+            # Base:
+            cv2.putText(legend, txt_min, (text_x, y_start + bar_h), 
+                        font, f_scale, color, thickness, cv2.LINE_AA)
+            
+            # Combinar com a imagem original
             combined = np.hstack((img, legend))
             return combined
         except Exception:
