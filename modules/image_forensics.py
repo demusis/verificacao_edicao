@@ -214,7 +214,11 @@ class ImageForensicsModule:
             diff_blur = cv2.GaussianBlur(diff_gray, (7,7), 0)
             norm_ghost = cv2.normalize(diff_blur, None, 0, 255, cv2.NORM_MINMAX)
             heatmap = cv2.applyColorMap(norm_ghost.astype(np.uint8), cv2.COLORMAP_JET)
-            heatmap_with_legend = self._add_colorbar(heatmap, cv2.COLORMAP_JET, "Baixo Erro", "Alto Erro")
+            
+            # Pegar valores reais antes da normalização para a legenda
+            real_min = float(np.min(diff_blur))
+            real_max = float(np.max(diff_blur))
+            heatmap_with_legend = self._add_colorbar(heatmap, cv2.COLORMAP_JET, "Baixo Erro", "Alto Erro", real_min, real_max)
             
             ghost_filename = f"{input_file.stem}_ghost_map_q{target_q}.jpg"
             ghost_path = self.cm.results_dir / ghost_filename
@@ -303,7 +307,7 @@ class ImageForensicsModule:
             # Vamos saturar em 30 para visualização
             vis_map = np.clip(prob_map * (255.0/30.0), 0, 255).astype(np.uint8)
             heatmap = cv2.applyColorMap(vis_map, cv2.COLORMAP_JET)
-            heatmap_with_legend = self._add_colorbar(heatmap, cv2.COLORMAP_JET, "Normal", "Resampled")
+            heatmap_with_legend = self._add_colorbar(heatmap, cv2.COLORMAP_JET, "Normal", "Resampled", 0.0, 30.0)
             
             res_filename = f"{input_file.stem}_resampling_map.jpg"
             res_path = self.cm.results_dir / res_filename
@@ -534,7 +538,7 @@ class ImageForensicsModule:
             # Resize para tamanho original para visualização
             dct_vis = cv2.resize(norm_map_uint8, (w, h), interpolation=cv2.INTER_NEAREST)
             dct_heatmap = cv2.applyColorMap(dct_vis, cv2.COLORMAP_INFERNO)
-            dct_with_legend = self._add_colorbar(dct_heatmap, cv2.COLORMAP_INFERNO, "Baixa Freq", "Alta Freq")
+            dct_with_legend = self._add_colorbar(dct_heatmap, cv2.COLORMAP_INFERNO, "Baixa Freq", "Alta Freq", 0.0, 50.0)
             
             # Salvar
             dct_filename = f"{input_file.stem}_dct_map.jpg"
@@ -641,7 +645,7 @@ class ImageForensicsModule:
             heatmap_color = cv2.applyColorMap(map_normalized, cv2.COLORMAP_JET)
             
             # Adicionar escala de cores (Legenda)
-            heatmap_with_legend = self._add_colorbar(heatmap_color, cv2.COLORMAP_JET, "Ruido Baixo", "Ruido Alto")
+            heatmap_with_legend = self._add_colorbar(heatmap_color, cv2.COLORMAP_JET, "Ruido Baixo", "Ruido Alto", min_val, max_val)
             
             # Salvar Mapa
             map_filename = f"{input_file.stem}_noise_map.jpg"
@@ -805,53 +809,52 @@ class ImageForensicsModule:
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    def _add_colorbar(self, img, colormap=cv2.COLORMAP_JET, label_min="Baixo", label_max="Alto"):
-        """Adiciona uma legenda de escala de cores ao lado da imagem com fundo branco e margens."""
+    def _add_colorbar(self, img, colormap=cv2.COLORMAP_JET, label_min="Baixo", label_max="Alto", val_min=None, val_max=None):
+        """Adiciona uma legenda com valores numéricos."""
         try:
             h, w = img.shape[:2]
             
             # Parâmetros de layout
             bar_w = 30
-            legend_w = 160 # Largura total da área da legenda
-            v_margin = 40  # Margem vertical para o texto não encostar nas bordas
-            h_margin = 15  # Distância do texto para a barra
+            legend_w = 200 # Aumentado para caber números
+            v_margin = 40
+            h_margin = 15
             
             # 1. Canvas da legenda (Fundo Branco)
             legend = np.full((h, legend_w, 3), 255, dtype=np.uint8)
             
-            # 2. Criar barra de gradiente vertical (centralizada verticalmente)
+            # 2. Criar barra de gradiente vertical
             bar_h = h - (2 * v_margin)
-            if bar_h <= 0: bar_h = h # fallback para imagens muito pequenas
+            if bar_h <= 0: bar_h = h
             
             bar_pixels = np.linspace(255, 0, bar_h).astype(np.uint8).reshape(-1, 1)
             bar_pixels = np.repeat(bar_pixels, bar_w, axis=1)
             bar_colored = cv2.applyColorMap(bar_pixels, colormap)
             
-            # Inserir barra no canvas (offset vertical)
             y_start = (h - bar_h) // 2
             legend[y_start:y_start+bar_h, 10:10+bar_w] = bar_colored
-            
-            # Borda fina ao redor da barra
             cv2.rectangle(legend, (10, y_start), (10+bar_w, y_start+bar_h), (180, 180, 180), 1)
             
-            # 3. Adicionar Rótulos (Texto em Preto)
+            # 3. Adicionar Rótulos e Valores
             font = cv2.FONT_HERSHEY_SIMPLEX
-            # Escala dinâmica baseada na altura da imagem
-            f_scale = max(0.4, min(1.2, h / 800.0))
+            f_scale = max(0.4, min(1.0, h / 800.0))
             thickness = 1 if f_scale < 0.8 else 2
-            color = (40, 40, 40) # Cinza muito escuro (melhor que preto puro)
+            color = (40, 40, 40)
             
-            # Texto Máximo (Topo)
-            cv2.putText(legend, str(label_max), (10 + bar_w + h_margin, y_start + 15), 
+            # Formatar labels com valores se existirem
+            txt_max = str(label_max)
+            txt_min = str(label_min)
+            if val_max is not None:
+                txt_max += f" ({val_max:.1f})"
+            if val_min is not None:
+                txt_min += f" ({val_min:.1f})"
+
+            cv2.putText(legend, txt_max, (10 + bar_w + h_margin, y_start + 15), 
+                        font, f_scale, color, thickness, cv2.LINE_AA)
+            cv2.putText(legend, txt_min, (10 + bar_w + h_margin, y_start + bar_h - 5), 
                         font, f_scale, color, thickness, cv2.LINE_AA)
             
-            # Texto Mínimo (Base)
-            cv2.putText(legend, str(label_min), (10 + bar_w + h_margin, y_start + bar_h - 5), 
-                        font, f_scale, color, thickness, cv2.LINE_AA)
-            
-            # Combinar com a imagem original
             combined = np.hstack((img, legend))
             return combined
         except Exception:
-            # Fallback seguro para não quebrar a análise se algo falhar no desenho
             return img
