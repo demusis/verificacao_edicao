@@ -1119,9 +1119,8 @@ class ReportingModule:
                 latex += r"\end{itemize}"
                 
                 if faces == 0 and bodies == 0:
-                    latex += r"\begin{tcolorbox}[colback=warning!10,title=Aviso]"
-                    latex += r"Nenhum rosto ou corpo humano foi detectado. A análise de deepfake é aplicável apenas a mídias com presença humana. "
-                    latex += r"Scores abaixo são baseados em análise espectral geral."
+                    latex += r"\begin{tcolorbox}[colback=warning!10,title=Nota sobre Detecção Automática]"
+                    latex += r"Nenhum rosto ou corpo humano foi detectado automaticamente. No entanto, as técnicas de análise espectral e de textura aplicadas abaixo podem identificar artefatos de geração sintética (IA/GAN) em qualquer região da mídia (cenários, objetos ou fundo), independentemente da presença humana."
                     latex += r"\end{tcolorbox}"
                 
                 # Results table with color-coded interpretation
