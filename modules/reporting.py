@@ -1630,5 +1630,42 @@ class ReportingModule:
                 
                 latex = self._add_refs(latex, "PRNU")
 
+        # --- FINAL SECTION: ANALYSIS CONFIGURATION ---
+        latex += r"\newpage"
+        latex += r"\section{Parâmetros de Configuração da Análise}"
+        latex += r"Para fins de auditabilidade e reprodutibilidade, seguem os parâmetros técnicos utilizados pelo software durante o processamento deste caso."
+        
+        latex += r"\begin{table}[h!]\centering"
+        latex += r"\begin{tabular}{|l|l|}"
+        latex += r"\hline "
+        latex += r"\textbf{Parâmetro} & \textbf{Valor} \\ \hline "
+        
+        # Mapeamento amigável
+        friendly_names = {
+            "copymove_features": "Pontos SIFT (Clonagem)",
+            "copymove_min_cluster": "Rigor (Mínimo Cluster Clonagem)",
+            "resampling_block_size": "Tam. Bloco (Resampling)",
+            "prnu_frame_limit": "Limite de Quadros (PRNU)",
+            "ela_quality": "Qualidade ELA",
+            "deepfake_noise_threshold": "Threshold de Ruído (Deepfake)",
+            "deepfake_jitter_threshold": "Sensibilidade de Jitter",
+            "deepfake_fast_mode": "Modo Rápido (Deepfake)"
+        }
+        
+        # Filtrar apenas chaves de parâmetros (ignorar flags de inclusão no relatório)
+        # Sort keys for consistent output
+        sorted_keys = sorted(self.config.keys())
+        for key in sorted_keys:
+            if key.startswith("report_"): continue
+            
+            value = self.config[key]
+            name = friendly_names.get(key, key)
+            val_str = "Ativado" if value is True else "Desativado" if value is False else str(value)
+            latex += f"{esc(name)} & {esc(val_str)} \\\\ \\hline \n"
+            
+        latex += r"\end{tabular}"
+        latex += r"\caption{Configurações técnicas do motor de análise.}"
+        latex += r"\end{table}"
+
         latex += r"\end{document}"
         return latex
