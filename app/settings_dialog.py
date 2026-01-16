@@ -12,29 +12,50 @@ DEFAULT_CONFIG = {
     "copymove_min_cluster": 4,
     "resampling_block_size": 64,
     "prnu_frame_limit": 50,
-    "ela_quality": 90
+    "ela_quality": 90,
+    # Configurações de exibição no relatório
+    "report_metadata": True,      # Vídeo/Imagem/Áudio
+    "report_structure": True,     # Vídeo
+    "report_continuity": True,    # Vídeo
+    "report_gop": True,           # Vídeo
+    "report_statistical": True,   # Vídeo
+    "report_quantization": True,  # Vídeo
+    "report_prnu": True,          # Vídeo/Imagem
+    "report_deepfake": True,      # Vídeo/Imagem
+    "report_ela": True,           # Imagem
+    "report_noise": True,         # Imagem
+    "report_copymove": True,      # Imagem
+    "report_resampling": True,    # Imagem
+    "report_jpeg_ghosts": True    # Imagem
 }
+
+def load_config():
+    """Carrega o config do JSON, funde com os padrões e cria o arquivo se não existir."""
+    config = DEFAULT_CONFIG.copy()
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                config.update(data)
+                return config
+        except:
+            pass
+    
+    # Se não existir ou erro na leitura, garantir que o arquivo exista com padrões
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(DEFAULT_CONFIG, f, indent=4)
+    except:
+        pass
+    return DEFAULT_CONFIG.copy()
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Configurações Avançadas")
         self.resize(400, 300)
-        self.config = self.load_config()
+        self.config = load_config()
         self.init_ui()
-
-    def load_config(self):
-        if CONFIG_FILE.exists():
-            try:
-                with open(CONFIG_FILE, 'r') as f:
-                    data = json.load(f)
-                    # Merge with default ensuring all keys exist
-                    config = DEFAULT_CONFIG.copy()
-                    config.update(data)
-                    return config
-            except:
-                pass
-        return DEFAULT_CONFIG.copy()
 
     def save_config(self):
         try:
@@ -193,6 +214,65 @@ class SettingsDialog(QDialog):
         
         tabs.addTab(tab_df, "Deepfake/Forense")
         
+        # --- TAB: Relatório ---
+        tab_rep = QWidget()
+        form_rep = QFormLayout(tab_rep)
+        from PySide6.QtWidgets import QCheckBox
+
+        self.chk_rep_meta = QCheckBox("Metadados e Identificação (Vídeo/Áudio/Imagem)")
+        self.chk_rep_meta.setChecked(bool(self.config.get('report_metadata', True)))
+        form_rep.addRow(self.chk_rep_meta)
+
+        self.chk_rep_struct = QCheckBox("Estrutura do Arquivo (Vídeo)")
+        self.chk_rep_struct.setChecked(bool(self.config.get('report_structure', True)))
+        form_rep.addRow(self.chk_rep_struct)
+
+        self.chk_rep_cont = QCheckBox("Continuidade Visual e PTS/DTS (Vídeo)")
+        self.chk_rep_cont.setChecked(bool(self.config.get('report_continuity', True)))
+        form_rep.addRow(self.chk_rep_cont)
+
+        self.chk_rep_gop = QCheckBox("Estrutura de Compressão GOP (Vídeo)")
+        self.chk_rep_gop.setChecked(bool(self.config.get('report_gop', True)))
+        form_rep.addRow(self.chk_rep_gop)
+
+        self.chk_rep_stat = QCheckBox("Análise Estatística Benford/FFT (Vídeo)")
+        self.chk_rep_stat.setChecked(bool(self.config.get('report_statistical', True)))
+        form_rep.addRow(self.chk_rep_stat)
+
+        self.chk_rep_quant = QCheckBox("Análise de Quantização (Vídeo)")
+        self.chk_rep_quant.setChecked(bool(self.config.get('report_quantization', True)))
+        form_rep.addRow(self.chk_rep_quant)
+
+        self.chk_rep_prnu = QCheckBox("Identificação de Fonte PRNU (Vídeo/Imagem)")
+        self.chk_rep_prnu.setChecked(bool(self.config.get('report_prnu', True)))
+        form_rep.addRow(self.chk_rep_prnu)
+
+        self.chk_rep_df = QCheckBox("Detecção de Deepfake/IA (Vídeo/Imagem)")
+        self.chk_rep_df.setChecked(bool(self.config.get('report_deepfake', True)))
+        form_rep.addRow(self.chk_rep_df)
+
+        self.chk_rep_ela = QCheckBox("Análise de Nível de Erro - ELA (Imagem)")
+        self.chk_rep_ela.setChecked(bool(self.config.get('report_ela', True)))
+        form_rep.addRow(self.chk_rep_ela)
+
+        self.chk_rep_noise = QCheckBox("Consistência de Ruído (Imagem)")
+        self.chk_rep_noise.setChecked(bool(self.config.get('report_noise', True)))
+        form_rep.addRow(self.chk_rep_noise)
+
+        self.chk_rep_cm = QCheckBox("Detecção de Clonagem - Copy-Move (Imagem)")
+        self.chk_rep_cm.setChecked(bool(self.config.get('report_copymove', True)))
+        form_rep.addRow(self.chk_rep_cm)
+
+        self.chk_rep_res = QCheckBox("Detecção de Resampling/Escalonamento (Imagem)")
+        self.chk_rep_res.setChecked(bool(self.config.get('report_resampling', True)))
+        form_rep.addRow(self.chk_rep_res)
+
+        self.chk_rep_ghost = QCheckBox("Análise de JPEG Ghosts (Imagem)")
+        self.chk_rep_ghost.setChecked(bool(self.config.get('report_jpeg_ghosts', True)))
+        form_rep.addRow(self.chk_rep_ghost)
+
+        tabs.addTab(tab_rep, "Exibição no Relatório")
+        
         layout.addWidget(tabs)
         
         # Buttons
@@ -218,6 +298,21 @@ class SettingsDialog(QDialog):
         self.config['deepfake_noise_threshold'] = self.spin_df_noise.value()
         self.config['deepfake_jitter_threshold'] = self.spin_df_jitter.value()
         self.config['deepfake_fast_mode'] = self.chk_df_fast.isChecked()
+        
+        # Report toggles
+        self.config['report_metadata'] = self.chk_rep_meta.isChecked()
+        self.config['report_structure'] = self.chk_rep_struct.isChecked()
+        self.config['report_continuity'] = self.chk_rep_cont.isChecked()
+        self.config['report_gop'] = self.chk_rep_gop.isChecked()
+        self.config['report_statistical'] = self.chk_rep_stat.isChecked()
+        self.config['report_quantization'] = self.chk_rep_quant.isChecked()
+        self.config['report_prnu'] = self.chk_rep_prnu.isChecked()
+        self.config['report_deepfake'] = self.chk_rep_df.isChecked()
+        self.config['report_ela'] = self.chk_rep_ela.isChecked()
+        self.config['report_noise'] = self.chk_rep_noise.isChecked()
+        self.config['report_copymove'] = self.chk_rep_cm.isChecked()
+        self.config['report_resampling'] = self.chk_rep_res.isChecked()
+        self.config['report_jpeg_ghosts'] = self.chk_rep_ghost.isChecked()
         
         self.save_config()
         self.accept()

@@ -13,6 +13,17 @@ class ReportingModule:
     def __init__(self, case_manager: CaseManager):
         self.cm = case_manager
         self.logger = self.cm.get_logger()
+        self.config = self._load_config()
+
+    def _load_config(self):
+        config_path = Path("config.json")
+        if config_path.exists():
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                pass
+        return {}
 
     def _format_date(self, iso_str):
         """Formata data ISO para legível com timezone."""
@@ -113,7 +124,9 @@ class ReportingModule:
     # Banco de Referências Bibliográficas (ABNT)
     REFERENCES_DB = {
         "ELA": [
-            r"KRAWETZ, N. A Picture's Worth: Digital Image Analysis and Forensics. In: \textit{Black Hat Briefings}, Las Vegas, 2007. Disponível em: \url{http://www.hackerfactor.com/}. Acesso em: 2025.",
+            r"KRAWETZ, N. A Picture's Worth: Digital Image Analysis and Forensics. In: \textit{Black Hat Briefings}, Las Vegas, 2007.",
+            r"FARID, H. Exposing Digital Forgeries from JPEG Ghosts. \textit{IEEE Transactions on Information Forensics and Security}, 2009.",
+            r"LIN, Z. et al. Fast, Automatic and Fine-Grained Tampered JPEG Image Detection via DCT Coefficient Analysis. \textit{Pattern Recognition}, 2009."
         ],
         "PRNU": [
             r"CHEN, M. et al. Determining Image Origin and Integrity Using Sensor Noise. \textit{IEEE Transactions on Information Forensics and Security}, v. 3, n. 1, p. 74-90, 2008.",
@@ -274,11 +287,11 @@ class ReportingModule:
 \pagestyle{fancy}
 \fancyhf{}
 \lhead{\small \textcolor{gray}{Relatório Forense de Imagem/Vídeo}}
-\rhead{\small \textcolor{gray}{\today}}
+\rhead{}
 \cfoot{\thepage}
 
 \title{\textbf{\textcolor{primary}{Relatório de Análise Forense de Imagem/Vídeo}}}
-\date{\today}
+\date{}
 
 \begin{document}
 
@@ -312,7 +325,7 @@ class ReportingModule:
                  latex += r"\end{figure}"
             
             # --- 1. FILE ANALYSIS ---
-            if 'file_analysis' in f_analyses:
+            if 'file_analysis' in f_analyses and self.config.get('report_metadata', True):
                 fa = f_analyses['file_analysis']
                 meta = fa.get('metadata', {})
                 fmt = meta.get('format', {})
@@ -411,7 +424,8 @@ class ReportingModule:
 
                 # --- 4. GOP ---
                 gop = fa.get('gop_stats', {})
-                latex += r"\subsection{Estrutura de Compressão (GOP)}"
+                if self.config.get('report_gop', True):
+                    latex += r"\subsection{Estrutura de Compressão (GOP)}"
                 
                 # Help Box - Expanded
                 latex += r"\begin{tcolorbox}[colback=lightgray,title=O que é GOP (Group of Pictures)?]"
@@ -504,10 +518,11 @@ class ReportingModule:
                 
                 latex += r"\end{tcolorbox}"
                 
-                latex = self._add_refs(latex, "GOP")
+                if self.config.get('report_gop', True):
+                    latex = self._add_refs(latex, "GOP")
 
             # --- 5. CONTINUITY ---
-            if 'continuity_analysis' in f_analyses:
+            if 'continuity_analysis' in f_analyses and self.config.get('report_continuity', True):
                 ca = f_analyses['continuity_analysis']
                 cuts = ca.get('cuts_detected', [])
                 total = ca.get('total_cuts', 0)
@@ -594,7 +609,7 @@ class ReportingModule:
 
 
             # --- STRUCTURE ANALYSIS ---
-            if 'structure_analysis' in f_analyses:
+            if 'structure_analysis' in f_analyses and self.config.get('report_structure', True):
                 sa = f_analyses['structure_analysis']
                 analysis = sa.get('analysis', {})
                 atoms = sa.get('atoms', [])
@@ -640,7 +655,7 @@ class ReportingModule:
                 latex = self._add_refs(latex, "STRUCTURE")
 
             # --- 6. STATISTICAL COMPRESSION ---
-            if 'compression_analysis' in f_analyses:
+            if 'compression_analysis' in f_analyses and self.config.get('report_statistical', True):
                 comp = f_analyses['compression_analysis']
                 benford = comp.get('benford_analysis', {})
                 fourier = comp.get('fourier_analysis', {})
@@ -851,7 +866,7 @@ class ReportingModule:
                 latex = self._add_refs(latex, "PERIODICITY")
 
             # --- 7. IMAGE ANALYSIS (ELA) ---
-            if 'image_analysis' in f_analyses:
+            if 'image_analysis' in f_analyses and self.config.get('report_ela', True):
                 img_an = f_analyses['image_analysis']
                 meta = img_an.get('metadata', {})
                 ela = img_an.get('ela_analysis', {})
@@ -952,20 +967,32 @@ class ReportingModule:
                     latex += r"Nenhum metadado de câmera (EXIF) significativo foi encontrado. Isso pode indicar que o arquivo foi processado 'limpo' ou é nativamente digital sem sensores."
                     latex += r"\end{tcolorbox}"
 
-                # ELA Section
                 latex += r"\subsection{Análise de Nível de Erro (ELA)}"
                 
-                latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia ELA]"
-                latex += r"A Error Level Analysis identifica áreas da imagem com diferentes níveis de compressão JPEG. Em uma imagem original, o erro deve ser uniforme. Áreas mais brilhantes ou com padrões diferentes podem indicar manipulação digital (colagens, pincéis)."
+                latex += r"\begin{tcolorbox}[colback=lightgray,title=Fundamentação Científica (Steady State)]"
+                latex += r"A Error Level Analysis (ELA) baseia-se no princípio de que imagens JPEG, quando salvas sequencialmente com o mesmo nível de qualidade, atingem um estado de equilíbrio (steady state). "
+                latex += r"Modificações posteriores à última compressão resetam este estado. Assim, ao recomprimir a imagem e medir o erro (Global Difference Score), regiões manipuladas apresentam níveis de ruído divergentes do restante da imagem."
                 latex += r"\end{tcolorbox}"
-                
                 if ela.get('status') == 'success':
                     ela_score = ela.get('ela_score', 0)
                     ela_img_file = ela.get('ela_image')
                     amp = ela.get('amplification_factor', 15)
                     
-                    latex += f"\\textbf{{Score de Diferença Global:}} {ela_score:.2f} (Amplificação: {amp}x)\n\n"
-                    latex += r"\vspace{0.5cm}"
+                    latex += f"\\textbf{{Score de Diferença Global (MAE):}} {ela_score:.2f} (Amplificação Visual: {amp}x)\n\n"
+                    
+                    # Tabela de Referência ELA
+                    latex += r"\noindent\textbf{Parâmetros de Interpretação (Valores MAE):}"
+                    latex += r"\begin{center}"
+                    latex += r"\begin{tabular}{l l l}"
+                    latex += r"\toprule \textbf{Score MAE} & \textbf{Classificação} & \textbf{Interpretação Forense} \\ \midrule "
+                    latex += r"< 2.0 & \textcolor{success}{Muito Baixo} & Alta qualidade / Steady State (Q95-100) \\ "
+                    latex += r"2.0 - 5.0 & \textcolor{success}{Típico} & Padrão esperado para JPEG (Q80-95) \\ "
+                    latex += r"5.0 - 10.0 & \textcolor{warning}{Elevado} & Recompressão ou múltiplos salvamentos \\ "
+                    latex += r"> 10.0 & \textcolor{danger}{Crítico} & Compressão agressiva / Manipulação profunda \\ "
+                    latex += r"\bottomrule \end{tabular}"
+                    latex += r"\end{center}"
+                    
+                    latex += r"\vspace{0.3cm}"
                     
                     # Embed Image
                     # No LaTeX, precisamos do caminho relativo ao .tex ou absoluto.
@@ -1006,7 +1033,7 @@ class ReportingModule:
             elif 'noise_analysis' in f_analyses:
                 noise_data = f_analyses['noise_analysis']
 
-            if noise_data:
+            if noise_data and self.config.get('report_noise', True):
                 noise = noise_data
                 stats = noise.get('global_stats', {})
                 outliers = noise.get('outliers_detected', 0)
@@ -1059,7 +1086,7 @@ class ReportingModule:
                         deepfake_data = v
                         break
             
-            if deepfake_data and deepfake_data.get('status') not in ['error', 'skipped']:
+            if deepfake_data and deepfake_data.get('status') not in ['error', 'skipped'] and self.config.get('report_deepfake', True):
                 df = deepfake_data
                 
                 latex += r"\subsection{Análise de Deepfake e Consistência Física}"
@@ -1221,7 +1248,7 @@ class ReportingModule:
             elif 'dct_analysis' in f_analyses:
                 dct_data = f_analyses['dct_analysis']
                 
-            if dct_data:
+            if dct_data and self.config.get('report_ela', True): # Usando report_ela para DCT também ou report_metadata?
                 dct = dct_data
                 d_stats = dct.get('global_stats', {})
                 d_map = dct.get('map_image')
@@ -1267,7 +1294,7 @@ class ReportingModule:
             elif 'copymove_analysis' in f_analyses:
                 cm_data = f_analyses['copymove_analysis']
                 
-            if cm_data:
+            if cm_data and self.config.get('report_copymove', True):
                 cm = cm_data
                 matches = cm.get('matches_found', 0)
                 cm_map = cm.get('map_image')
@@ -1319,7 +1346,7 @@ class ReportingModule:
             elif 'resampling_analysis' in f_analyses:
                 res_data = f_analyses['resampling_analysis']
                 
-            if res_data:
+            if res_data and self.config.get('report_resampling', True):
                 res = res_data
                 res_map = res.get('map_image')
                 res_score = res.get('global_periodicity_score', 0)
@@ -1368,7 +1395,7 @@ class ReportingModule:
             elif 'jpeg_analysis' in f_analyses:
                 jpeg_data = f_analyses['jpeg_analysis']
                 
-            if jpeg_data:
+            if jpeg_data and self.config.get('report_jpeg_ghosts', True):
                 jpg = jpeg_data
                 ghost_map = jpg.get('map_image')
                 is_double = jpg.get('is_double_compression', False)
@@ -1376,8 +1403,15 @@ class ReportingModule:
                 jpg_conc = jpg.get('conclusion', '')
                 
                 latex += r"\subsection{Análise de Compressão JPEG (Ghosts)}"
-                latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia]"
-                latex += r"Verifica se a imagem foi salva múltiplas vezes em diferentes qualidades. O 'Ghost Map' destaca inconsistências de compressão. Mínimos locais na curva de erro indicam a qualidade original provável."
+                latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia e Conceitos Fundamentais]"
+                latex += r"\textbf{Princípio:} Identifica inconsistências de compressão comparando a imagem com versões recomprimidas em diversas qualidades. "
+                latex += r"Se a imagem foi editada e re-salva, ela retém 'fantasmas' (artefatos) da compressão anterior."
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{O que é o Fator Q (Quality Factor)?} É o parâmetro que define a agressividade da compressão JPEG (geralmente de 1 a 100). "
+                latex += r"Quanto maior o Q, maior a fidelidade e menor a perda de dados."
+                latex += r"\vspace{0.2cm}"
+                latex += r"\textbf{Qualidade Original Estimada:} Através de um 'sweep' de recompressão, o sistema busca o ponto onde o erro residual é mínimo. "
+                latex += r"Um mínimo local em um valor Q específico (ex: Q63) sugere fortemente que a imagem passou por um ciclo de compressão naquela qualidade no passado."
                 latex += r"\end{tcolorbox}"
                 
                 if jpg.get('status') == 'success':
@@ -1386,32 +1420,33 @@ class ReportingModule:
                         latex += r"\begin{figure}[H]"
                         latex += r"\centering"
                         latex += f"\\includegraphics[width=0.85\\textwidth]{{{rel_path}}}"
-                        latex += r"\caption{Mapa de Fantasmas (" + f"Simulado Q{est_q}" + r")}"
+                        latex += r"\caption{Ghost Map (Diferença para Q" + str(est_q) + r")}"
                         latex += r"\end{figure}"
                         
-                    latex += r"\noindent\textbf{Resultados:}"
+                    latex += r"\noindent\textbf{Resultados da Investigação:}"
                     latex += r"\begin{itemize}"
-                    latex += f"\\item \\textbf{{Status:}} {'Dupla Compressão Detectada' if is_double else 'Padrão Consistente'}"
+                    
+                    status_fmt = r"\textbf{Dupla Compressão / Edição Detectada}" if is_double else "Padrão único/Consistente"
+                    latex += f"\\item \\textbf{{Diagnóstico:}} {status_fmt}"
+                    
                     if est_q > 0:
-                        latex += f"\\item \\textbf{{Qualidade Original Estimada:}} Q{est_q}"
+                        latex += f"\\item \\textbf{{Fator Q de Referência:}} Q{est_q} (Ponto de menor erro detectado)"
                     latex += r"\end{itemize}"
                     
-                    if is_double:
-                        box_col = "danger!10"
-                    else:
-                        box_col = "success!10"
+                    box_col = "danger!10" if is_double else "success!10"
+                    title = "Conclusão da Análise de Ghosts"
 
-                    latex += f"\\begin{{tcolorbox}}[colback={box_col},title=Conclusão JPEG]"
+                    latex += f"\\begin{{tcolorbox}}[colback={box_col},title={title}]"
                     latex += esc(jpg_conc)
                     latex += r"\end{tcolorbox}"
                 else:
-                    latex += r"\textrm{Erro JPEG: " + esc(jpg.get('error','')) + r"}"
+                    latex += r"\textrm{Erro na análise JPEG: " + esc(jpg.get('error','')) + r"}"
                 
                 latex = self._add_refs(latex, "JPEG")
 
 
             # --- 7. QUANTIZATION ---
-            if 'quantization_analysis' in f_analyses:
+            if 'quantization_analysis' in f_analyses and self.config.get('report_quantization', True):
                 qa = f_analyses['quantization_analysis']
                 q_info = qa.get('q_matrix_info', {})
                 conc = qa.get('conclusion', '')
@@ -1491,7 +1526,7 @@ class ReportingModule:
                 latex = self._add_refs(latex, "QUANTIZATION")
 
             # --- 8. PRNU INDIVIDUAL ---
-            if 'prnu_analysis' in f_analyses:
+            if 'prnu_analysis' in f_analyses and self.config.get('report_prnu', True):
                 prnu = f_analyses['prnu_analysis']
                 status = prnu.get('status', 'N/A')
                 res = prnu.get('resolution', 'N/A')
@@ -1511,7 +1546,7 @@ class ReportingModule:
         
         # --- 8. PRNU MATRIX (GLOBAL) ---
         prnu_matrix = data.get('prnu_matrix', {})
-        if prnu_matrix and 'matrix' in prnu_matrix:
+        if prnu_matrix and 'matrix' in prnu_matrix and self.config.get('report_prnu', True):
             matrix_data = prnu_matrix['matrix']
             files = prnu_matrix.get('files', [])
             

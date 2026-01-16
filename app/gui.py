@@ -20,7 +20,7 @@ from modules.quantization_analysis import QuantizationAnalysisModule
 from modules.structure_analysis import StructureAnalysisModule
 from modules.image_forensics import ImageForensicsModule # NEW
 from modules.deepfake_analysis import DeepfakeAnalysisModule # NEW
-from app.settings_dialog import SettingsDialog, DEFAULT_CONFIG
+from app.settings_dialog import SettingsDialog, DEFAULT_CONFIG, load_config
 
 from modules.reporting import ReportingModule
 import json
@@ -341,12 +341,7 @@ class MainWindow(QMainWindow):
         self.log_output.clear()
         
         # Load Config
-        config = DEFAULT_CONFIG.copy()
-        if Path("config.json").exists():
-            try:
-                with open("config.json", 'r') as f:
-                    config.update(json.load(f))
-            except: pass
+        config = load_config()
         
         # Passar case_name explicitamente para o Worker se possível, 
         # mas o worker atual gera o nome internamente. Precisamos mudar o Worker __init__ também.
@@ -372,6 +367,9 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Falha", f"Ocorreu um erro durante a análise:\n{result_path}")
 
 def main():
+    # Garantir que o config.json exista com os padrões antes de iniciar
+    load_config()
+    
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
