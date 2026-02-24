@@ -5,6 +5,16 @@ tzdata
 numpy
 scipy
 pyinstaller
+scikit-image>=0.21.0
 
 opencv-python
 PyWavelets
+librosa
+soundfile
+audioread
+soxr
+numba
+decorator
+joblib
+pooch
+lazy_loader

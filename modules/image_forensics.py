@@ -16,7 +16,15 @@ class ImageForensicsModule:
     
     def __init__(self, case_manager: CaseManager, config: dict = None):
         self.cm = case_manager
-        self.config = config or {}
+        # Prioridade: Config injetada > Dict vazio
+        # Converter objeto AnalysisConfig para dict se necessário
+        if config is not None:
+            if hasattr(config, 'to_dict'):
+                self.config = config.to_dict()
+            else:
+                self.config = config
+        else:
+            self.config = {}
         self.logger = self.cm.get_logger()
         self.ffmpeg = FFmpegAdapter(self.logger) # Usado para metadados robustos
 

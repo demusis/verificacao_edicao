@@ -1,7 +1,19 @@
 import cv2
 import numpy as np
 import os
+import sys
 from pathlib import Path
+from skimage.feature import local_binary_pattern
+
+def get_haarcascades_path():
+    """Retorna o caminho para os arquivos haarcascades, compatível com PyInstaller."""
+    if hasattr(sys, '_MEIPASS'):
+        # Executando dentro de um executável PyInstaller
+        # Os arquivos XML são copiados diretamente para cv2/data/
+        return os.path.join(sys._MEIPASS, 'cv2', 'data') + os.sep
+    else:
+        # Executando normalmente (desenvolvimento)
+        return cv2.data.haarcascades
 
 class DeepfakeAnalysisModule:
     """
@@ -9,15 +21,23 @@ class DeepfakeAnalysisModule:
     Implementa verificações de:
     1. Consistência Física (Ruído/ELA) entre Sujeito e Fundo.
     2. Artefatos de Frequência (FFT) típicos de GANs.
-    3. Análise de Textura (LBP) para detecção de suavização de pele.
-    4. Análise Especular (Olhos).
+    3. Análise de Textura (LBP) com histograma para detecção de suavização.
+    4. Análise Global para imagens sem faces/corpos detectados.
     """
 
     def __init__(self, config=None):
-        self.config = config or {}
-        # Carregar Classificadores
-        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+        # Converter objeto AnalysisConfig para dict se necessário
+        if config is not None:
+            if hasattr(config, 'to_dict'):
+                self.config = config.to_dict()
+            else:
+                self.config = config
+        else:
+            self.config = {}
+        # Carregar Classificadores - compatível com PyInstaller
+        haarcascades_path = get_haarcascades_path()
+        self.face_cascade = cv2.CascadeClassifier(haarcascades_path + 'haarcascade_frontalface_default.xml')
+        self.eye_cascade = cv2.CascadeClassifier(haarcascades_path + 'haarcascade_eye.xml')
         
         # Detector de Pessoas (HOG)
         self.hog = cv2.HOGDescriptor()
@@ -97,7 +117,7 @@ class DeepfakeAnalysisModule:
             cap.release()
             
             if analyzed_frames == 0:
-                result["status"] = "skpped"
+                result["status"] = "skipped"
                 return result
 
             # Calcular Médias e Jitter (Desvio Padrão Temporal)
@@ -118,8 +138,6 @@ class DeepfakeAnalysisModule:
                 if frame_fft > 70: result["is_suspicious"] = True
             for frame_tex in history_texture:
                 if frame_tex > 70: result["is_suspicious"] = True
-            
-
             
             jitter_threshold = int(self.config.get('deepfake_jitter_threshold', 15))
             if result["temporal_jitter"] > jitter_threshold:
@@ -143,27 +161,36 @@ class DeepfakeAnalysisModule:
             "consistency_score": 0,
             "frequency_score": 0,
             "texture_score": 0,
+            "noise_score": 0,
             "eye_consistency": "N/A",
             "is_suspicious": False,
+            "analysis_type": "face_body",
             "details": []
         }
 
     def _finalize_result(self, result):
         # Heurística final baseada nas métricas acumuladas
+        # Exigir MÚLTIPLOS indicadores para reduzir falsos positivos
+        suspicious_count = 0
+        
         if result["frequency_score"] > 70:
-            result["is_suspicious"] = True
+            suspicious_count += 1
             if "Artefatos de alta frequência" not in str(result["details"]):
                 result["details"].append("Artefatos de GAN frequentes detectados.")
                 
-        if result["texture_score"] > 80:
-            result["is_suspicious"] = True
+        if result["texture_score"] > 70:
+            suspicious_count += 1
             if "Textura facial anormalmente lisa" not in str(result["details"]):
-                result["details"].append("Textura artificial detectada consistentemente.")
+                result["details"].append("Textura artificial detectada.")
 
         if result["consistency_score"] > 70:
-            result["is_suspicious"] = True
+            suspicious_count += 1
             if "Inconsistência física" not in str(result["details"]):
                 result["details"].append("Inconsistência de ruído/iluminação entre sujeito e fundo.")
+
+        # Só marcar como suspeito se MÚLTIPLOS indicadores concordarem
+        if suspicious_count >= 2:
+            result["is_suspicious"] = True
 
     def _analyze_frame(self, img):
         """Analisa um único frame (numpy array)."""
@@ -173,11 +200,14 @@ class DeepfakeAnalysisModule:
             "consistency_score": 0,
             "frequency_score": 0,
             "texture_score": 0,
+            "noise_score": 0,
             "is_suspicious": False,
+            "analysis_type": "face_body",
             "details": []
         }
         
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        ycbcr = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
         
         # 1. Detecção
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
@@ -186,7 +216,10 @@ class DeepfakeAnalysisModule:
         res["detected_faces"] = len(faces)
         res["detected_bodies"] = len(bodies)
         
+        # Se não detectar faces nem corpos, fazer análise global da imagem
         if len(faces) == 0 and len(bodies) == 0:
+            global_res = self._analyze_global_image(img, gray)
+            res.update(global_res)
             return res
 
         # 2. Máscaras
@@ -195,7 +228,7 @@ class DeepfakeAnalysisModule:
         for (x,y,w,h) in bodies: cv2.rectangle(mask_subject, (x,y), (x+w,y+h), 255, -1)
         mask_background = cv2.bitwise_not(mask_subject)
         
-        # 3. Consistência
+        # 3. Consistência de Ruído (Proxy de Splicing)
         noise_map = cv2.Laplacian(gray, cv2.CV_64F)
         noise_var_subject = np.var(noise_map[mask_subject > 0]) if np.any(mask_subject > 0) else 0
         noise_var_bg = np.var(noise_map[mask_background > 0]) if np.any(mask_background > 0) else 0
@@ -203,95 +236,201 @@ class DeepfakeAnalysisModule:
         max_var = max(noise_var_subject, noise_var_bg, 1e-5)
         diff_ratio = abs(noise_var_subject - noise_var_bg) / max_var
         
-        # Converte ratio (0-1) para score (0-100)
         res["consistency_score"] = int(diff_ratio * 100)
 
         if diff_ratio > (int(self.config.get('deepfake_noise_threshold', 50)) / 100.0):
-            res["details"].append(f"Inconsistência de Ruído ({diff_ratio:.2f})")
+            res["details"].append(f"Inconsistência de Ruído Sujeito/Fundo ({diff_ratio:.2f})")
             if diff_ratio > 0.7: res["is_suspicious"] = True
 
-        # 4. FFT e Textura (Faces)
-        # Modo Rápido: Pular FFT/LBP se ativado
-        fast_mode = self.config.get('deepfake_fast_mode', False)
-        
+        # 4. FFT e Textura (Faces) - Foco em AI/Deepfake
         max_fft = 0
         max_tex = 0
         
-        if not fast_mode:
-            for (x,y,w,h) in faces:
-                face_roi = gray[y:y+h, x:x+w]
-                fft = self._analyze_frequency_artifacts(face_roi)
-                tex = self._analyze_texture_lbp(face_roi)
-                max_fft = max(max_fft, fft)
-                max_tex = max(max_tex, tex)
-        else:
-             res["details"].append("Modo Rápido: FFT/LBP ignorados.")
+        for (x,y,w,h) in faces:
+            # ROI da face em escala de cinza e YCbCr
+            face_roi_gray = gray[y:y+h, x:x+w]
+            face_roi_ycbcr = ycbcr[y:y+h, x:x+w]
             
-        res["frequency_score"] = max_fft
+            if face_roi_gray.size < 400:  # ROI mínimo para análise confiável
+                continue
+                
+            # FFT nos canais de luminância e crominância
+            fft_y = self._analyze_frequency_artifacts(face_roi_ycbcr[:,:,0]) # Y
+            fft_cr = self._analyze_frequency_artifacts(face_roi_ycbcr[:,:,1]) # Cr
+            fft_cb = self._analyze_frequency_artifacts(face_roi_ycbcr[:,:,2]) # Cb
+            
+            # Textura na face
+            tex = self._analyze_texture_lbp(face_roi_gray)
+            
+            # Score de frequência é o maior entre os canais (IA costuma falhar na crominância)
+            current_fft = max(fft_y, int(fft_cr * 1.2), int(fft_cb * 1.2))
+            max_fft = max(max_fft, current_fft)
+            max_tex = max(max_tex, tex)
+            
+        res["frequency_score"] = min(100, max_fft)
         res["texture_score"] = max_tex
         
-        if max_fft > 75: res["is_suspicious"] = True
-        if max_tex > 85: res["is_suspicious"] = True
+        # Decisão baseada na combinação (Moderna Diffusion Detection)
+        if res["frequency_score"] > 70:
+            res["details"].append("Artefatos de frequência anômalos detectados (provável GAN/Diffusion).")
+        if res["texture_score"] > 70:
+            res["details"].append("Textura facial excessivamente regular ou suavizada (padrão AI).")
+
+        if (res["frequency_score"] > 65 and res["texture_score"] > 65) or res["frequency_score"] > 85 or res["texture_score"] > 85:
+            res["is_suspicious"] = True
         
         return res
 
-    def _analyze_frequency_artifacts(self, roi):
+    def _analyze_global_image(self, img, gray):
         """
-        Detecta picos anômalos em alta frequência usando FFT (Mag).
-        GANs costumam gerar 'checkerboard artifacts' que aparecem como estrelas/pontos no espectro.
+        Análise de deepfake para imagens SEM faces/corpos detectados.
+        """
+        res = {
+            "analysis_type": "global_image",
+            "frequency_score": 0,
+            "texture_score": 0,
+            "noise_score": 0,
+            "is_suspicious": False,
+            "details": ["Nenhuma face/corpo detectado. Executando análise global."]
+        }
+        
+        ycbcr = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
+        
+        # FFT nos canais Cr e Cb costuma ser mais revelador em Diffusion global
+        fft_cr = self._analyze_frequency_artifacts(ycbcr[:,:,1])
+        fft_cb = self._analyze_frequency_artifacts(ycbcr[:,:,2])
+        res["frequency_score"] = max(fft_cr, fft_cb)
+        
+        # LBP Global
+        res["texture_score"] = self._analyze_texture_lbp(gray)
+        
+        # Inconsistência de Blocos
+        res["noise_score"] = self._analyze_noise_blocks(gray)
+        
+        # Decisão para imagem global
+        indicators = 0
+        if res["frequency_score"] > 65: indicators += 1
+        if res["texture_score"] > 65: indicators += 1
+        if res["noise_score"] > 70: indicators += 1
+        
+        if indicators >= 2 or res["frequency_score"] > 80:
+            res["is_suspicious"] = True
+            
+        return res
+
+    def _analyze_noise_blocks(self, gray, block_size=64):
+        """
+        Analisa consistência de ruído dividindo imagem em blocos.
         """
         try:
-            # FFT
-            f = np.fft.fft2(roi)
+            h, w = gray.shape
+            variances = []
+            
+            for y in range(0, h - block_size, block_size):
+                for x in range(0, w - block_size, block_size):
+                    block = gray[y:y+block_size, x:x+block_size]
+                    lap = cv2.Laplacian(block, cv2.CV_64F)
+                    variances.append(np.var(lap))
+            
+            if len(variances) < 4: return 0
+            
+            mean_var = np.mean(variances)
+            std_var = np.std(variances)
+            if mean_var < 1e-5: return 0
+            
+            cv = std_var / mean_var
+            return min(100, int(cv * 60)) # Ajustado peso
+            
+        except Exception:
+            return 0
+
+    def _analyze_frequency_artifacts(self, roi):
+        """
+        Detecta picos anômalos no espectro de frequência.
+        Melhorado para ser mais sensível a padrões de interpolação e Diffusion.
+        """
+        try:
+            if roi.shape[0] < 32 or roi.shape[1] < 32: return 0
+                
+            # Aplicar janela de Hanning para reduzir leakage espectral
+            win_y = np.hanning(roi.shape[0])
+            win_x = np.hanning(roi.shape[1])
+            window = np.outer(win_y, win_x)
+            roi_windowed = roi * window
+            
+            f = np.fft.fft2(roi_windowed)
             fshift = np.fft.fftshift(f)
-            magnitude_spectrum = 20 * np.log(np.abs(fshift) + 1)
+            magnitude_spectrum = np.abs(fshift)
             
-            # Calcular média azimutal (perfil radial) da magnitude
-            h, w = magnitude_spectrum.shape
-            center = (w//2, h//2)
+            # Log magnitude para análise
+            log_mag = np.log(magnitude_spectrum + 1)
+            
+            # Analisar altas frequências (região externa do espectro)
+            h, w = log_mag.shape
+            cy, cx = h // 2, w // 2
             y, x = np.ogrid[:h, :w]
-            r = np.sqrt((x - center[0])**2 + (y - center[1])**2)
+            dist_from_center = np.sqrt((x - cx)**2 + (y - cy)**2)
             
-            # Analisar altas frequências (raio > 2/3 da imagem)
-            mask_high_freq = (r > (min(h,w) * 0.6))
-            mean_high = np.mean(magnitude_spectrum[mask_high_freq])
-            std_high = np.std(magnitude_spectrum[mask_high_freq])
+            mask_high = dist_from_center > (min(h, w) * 0.4)
+            if not np.any(mask_high): return 0
             
-            # Se houver picos muito fortes (desvio padrão alto na alta freq), pode ser artefato
-            # Heurística experimental:
-            score = min(100, (std_high / mean_high) * 200) 
-            return int(score)
-        except:
+            high_freq_values = log_mag[mask_high]
+            
+            # Procura por picos (outliers) na alta frequência
+            # Imagens naturais têm decaimento suave. IA tem picos por repetitividade de kernels.
+            mean_h = np.mean(high_freq_values)
+            max_h = np.max(high_freq_values)
+            std_h = np.std(high_freq_values)
+            
+            peak_intensity = (max_h - mean_h) / (std_h + 1e-6)
+            
+            # Score baseado no desvio do pico em relação à média da alta freq
+            score = min(100, int(peak_intensity * 15))
+            
+            return score
+        except Exception:
             return 0
 
     def _analyze_texture_lbp(self, roi):
         """
-        Análise simplificada de textura.
-        Deepfakes ruins tendem a ter menos 'detalhe' real (alta frequência local).
+        Análise de textura usando LBP Multi-escala.
+        Imagens AI tendem a ter padrões de textura local muito uniformes em certas áreas.
         """
         try:
-            # Laplaciano como proxy de textura/detalhe de borda
-            lap = cv2.Laplacian(roi, cv2.CV_64F)
-            var = np.var(lap)
+            if roi.shape[0] < 32 or roi.shape[1] < 32: return 0
             
-            # Se a variância for muito baixa para um rosto (pele de boneca)
-            # Valor de referência empírico para rosto focado ~ 200-500+
-            # Abaixo de 50 é muito liso.
-            if var < 50: 
-                return 90 # Muito liso
-            elif var < 100:
-                return 50 # Liso
-            else:
-                return 0 # Textura ok
-        except:
+            scores = []
+            # Diferentes escalas para capturar texturas variadas
+            configs = [(8, 1), (16, 2), (24, 3)]
+            
+            for P, R in configs:
+                lbp = local_binary_pattern(roi, P, R, method='uniform')
+                n_bins = P + 2
+                hist, _ = np.histogram(lbp.ravel(), bins=n_bins, range=(0, n_bins), density=True)
+                
+                # Entropia (Imagens reais > Sintéticas)
+                hist_clean = hist + 1e-10
+                entropy = -np.sum(hist_clean * np.log2(hist_clean))
+                
+                # Concentração no padrão "smooth" (bin 0 ou bin max dependendo do pattern)
+                max_bin_ratio = np.max(hist)
+                
+                # Heurística de score parcial
+                p_score = 0
+                if entropy < (P * 0.15): p_score += 40 # Muito baixa entropia
+                if max_bin_ratio > 0.3: p_score += 40 # Concentração excessiva
+                scores.append(p_score)
+                
+            return min(100, int(np.mean(scores)))
+            
+        except Exception:
             return 0
 
     def _analyze_eyes(self, face_roi):
-        """Verifica detectabilidade e simetria básica de olhos."""
+        """Verifica se há brilhos especulares idênticos ou falta de detalhe na íris."""
+        # TODO: Implementar análise de brilho especular (refraction consistency)
         eyes = self.eye_cascade.detectMultiScale(face_roi)
         if len(eyes) < 2:
-            return "Assimetria/Oclusão"
-            
-        # Poderia checar specular highlights aqui
-        # Por enquanto, retorna OK se detectar 2 olhos
+            return "Indeterminado (Obscurecido)"
         return "Normal"
+

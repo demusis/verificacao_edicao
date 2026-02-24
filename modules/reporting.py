@@ -4,16 +4,22 @@ import re
 import json
 from pathlib import Path
 from core.case_manager import CaseManager
+
 from core.utils import get_timestamp_iso
 from datetime import datetime
 
 class ReportingModule:
     """Gerador de Relatórios (LaTeX -> PDF)."""
     
-    def __init__(self, case_manager: CaseManager):
+    def __init__(self, case_manager: CaseManager, config: dict = None):
         self.cm = case_manager
         self.logger = self.cm.get_logger()
-        self.config = self._load_config()
+        # Prioridade: Config injetada > Config do arquivo > Dict vazio
+        self.config = config if config is not None else (self._load_config() or {})
+        
+        # Converter objeto AnalysisConfig para dict se necessário
+        if hasattr(self.config, 'to_dict'):
+            self.config = self.config.to_dict()
 
     def _load_config(self):
         config_path = Path("config.json")
@@ -125,11 +131,10 @@ class ReportingModule:
     REFERENCES_DB = {
         "ELA": [
             r"KRAWETZ, N. A Picture's Worth: Digital Image Analysis and Forensics. In: \textit{Black Hat Briefings}, Las Vegas, 2007.",
-            r"FARID, H. Exposing Digital Forgeries from JPEG Ghosts. \textit{IEEE Transactions on Information Forensics and Security}, 2009.",
             r"LIN, Z. et al. Fast, Automatic and Fine-Grained Tampered JPEG Image Detection via DCT Coefficient Analysis. \textit{Pattern Recognition}, 2009."
         ],
         "PRNU": [
-            r"CHEN, M. et al. Determining Image Origin and Integrity Using Sensor Noise. \textit{IEEE Transactions on Information Forensics and Security}, v. 3, n. 1, p. 74-90, 2008.",
+            r"YU, P. et al. A survey on deepfake video detection. \textit{Iet Biometrics}, v. 10, n. 6, p. 607-624, 2021.",
             r"LUKAS, J.; FRIDRICH, J.; GOLJAN, M. Digital Camera Identification From Sensor Pattern Noise. \textit{IEEE Transactions on Information Forensics and Security}, v. 1, n. 2, p. 205-214, 2006."
         ],
         "COPYMOVE": [
@@ -137,7 +142,7 @@ class ReportingModule:
             r"CHRISTLEIN, V. et al. An Evaluation of Popular Copy-Move Forgery Detection Approaches. \textit{IEEE Transactions on Information Forensics and Security}, v. 7, n. 6, p. 1841-1854, 2012."
         ],
         "RESAMPLING": [
-            r"POPESCU, A. C.; FARID, H. Exposing Digital Forgeries by Detecting Traces of Re-sampling. \textit{IEEE Transactions on Signal Processing}, v. 53, n. 2, p. 758-767, 2005.",
+            r"KADHA, V.; BAKSHI, S; DAS, S. K. Unravelling digital forgeries: A systematic survey on image manipulation detection and localization. \textit{ ACM Computing Surveys}, v. 57, n. 12, p. 1-36, 2025.",
             r"MAHDIAN, B.; SAIC, S. Blind Authentication Using Periodic Properties of Interpolation. \textit{IEEE Transactions on Information Forensics and Security}, v. 3, n. 3, p. 529-538, 2008."
         ],
         "JPEG": [
@@ -148,7 +153,7 @@ class ReportingModule:
             r"MAHDIAN, B.; SAIC, S. Using Noise Inconsistencies for Blind Image Forensics. \textit{Image and Vision Computing}, v. 27, n. 10, p. 1497-1503, 2009."
         ],
         "DCT": [
-            r"SWAMINATHAN, A. et al. Digital Image Forensics. \textit{IEEE Signal Processing Magazine}, v. 26, n. 2, p. 89-98, 2009.",
+            r"SWAMINATHAN, A. et al. Digital Image Forensics via Intrisic Fingerprints. \textit{IEEE Transaktions on Information Forensic and Security}, v. 3, n. 1, p. 101-117, 2008.",
             r"LIN, Z. et al. Fast, Automatic and Fine-Grained Tampered JPEG Image Detection via DCT Coefficient Analysis. \textit{Pattern Recognition}, v. 42, n. 11, p. 2492-2501, 2009."
         ],
          "COMPRESSION": [
@@ -158,7 +163,7 @@ class ReportingModule:
             r"DURALL, R. et al. Watch your Up-Convolution: CNN Based Generative Models Yield Artificial Frequency Patterns. \textit{Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition}, 2020.",
         ],
         "PROCESSING": [
-            r"GLOZSSTEIN, I. et al. Multimedia Phylogeny: A Review. \textit{IEEE Transactions on Information Forensics and Security}, v. 12, n. 1, p. 248-264, 2017.",
+            r"DIAS, Z.; ROCHA, A.; GOLDENSTEIN, S. Image Phylogeny by Minimal Spanning Trees. \textit{IEEE Transactions on Information Forensics and Security}, v. 7, n. 2, p. 774-788, 2012.",
             r"MILANI, S. et al. An Overview on Video Forensics. \textit{APSIPA Transactions on Signal and Information Processing}, v. 1, e2, 2012."
         ],
         "GOP": [
@@ -166,24 +171,30 @@ class ReportingModule:
             r"BESTAGINI, P. et al. Video Codec Identification via GOP Analysis. \textit{IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)}, 2012."
         ],
         "CONTINUITY": [
-            r"STAMM, M. C. et al. Temporal Forensics and Frame Deletion Detection in Digital Video. \textit{IEEE International Conference on Image Processing (ICIP)}, 2012.",
-            r"GIRONI, A. et al. Video Frame Deletion Detection based on Consistency Analysis. \textit{IEEE International Workshop on Information Forensics and Security (WIFS)}, 2014."
+            r"STAMM, M. C. et al. Temporal forensics and anti-forensics for motion compensated video. \textit{IEEE Transactions on Information Forensics and Security}v. 7, n. 4, p. 1315-1329, 2012.",
+            r"GIRONI, A. et al. A video forensic technique for detecting frame deletion and insertion. \textit{ In: 2014 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)}, IEEE, 2014. p. 6226-6230."
         ],
         "STRUCTURE": [
-             r"GLOZSSTEIN, I. et al. Container Structure Analysis for Digital Video Forensics. \textit{Proceedings of the ACM Workshop on Multimedia and Security}, 2010.",
-             r"ISO/IEC 14496-12: Information technology — Coding of audio-visual objects — Part 12: ISO base media file format. \textit{International Organization for Standardization}, 2008."
+             r"MICHAŁEK, Marcin. Metadata in audio files compliant with ISO/IEC 14496-12 and their characteristics as well as the evaluation of usability in the investigation of the authenticity of recordings. \textit{Problems of Forensic Sciences}, v. 115, p. 241-261, 2018."
         ],
         "BENFORD_VIDEO": [
-             r"MILANI, S. et al. Video Forensics using Benford's Law. \textit{Proceedings of the European Signal Processing Conference (EUSIPCO)}, 2014.",
-             r"PEREZ-GONZALEZ, F. et al. A Benford's Law-based Approach for Double Compression Detection in MPEG Video. \textit{IEEE Transactions on Information Forensics and Security}, v. 9, n. 4, 2014."
+             r"VARGA, D. Benford’s Law and Perceptual Features for Face Image Quality Assessment \textit{Signals 4}, no. 4: 859-876. https://doi.org/10.3390/signals4040047, 2023."
         ],
         "PERIODICITY": [
              r"BIANCHI, T. et al. Detection of Non-Aligned Double JPEG Compression with Estimation of Primary Compression Parameters. \textit{IEEE International Conference on Image Processing (ICIP)}, 2011.",
              r"WANG, W.; FARID, H. Exposing Digital Forgeries in Video by Detecting Double MPEG Compression. \textit{Proceedings of the 8th Workshop on Multimedia and Security}, ACM, 2006."
         ],
         "QUANTIZATION": [
-             r"AGARWAL, S. et al. Source Camera Identification using H.264 Features. \textit{IEEE International Workshop on Information Forensics and Security (WIFS)}, 2011.",
-             r"DAL SANTO, H. et al. H.264 Video Authentication using Quantization Matrices. \textit{IEEE Transactions on Information Forensics and Security}, v. 11, n. 5, 2016."
+             r"MANISHA, C. T. L.; KARUNAKAR, A. K. Source Camera Identification with a Robust Device Fingerprint: Evolution from Image-Based to Video-Based Approaches \textit{Sensors 23}, no. 17: 7385, 2023, https://doi.org/10.3390/s23177385",
+             r"LAOUAMER, L. et al. Motion JPEG Video Authentication based on Quantization Matrix Watermarking: Application in Robotics. \textit{International Journal of Computer Applications}, v. 975, P. 8887, 2012."
+        ],
+        "AUDIO": [
+             r"MAHER, R. C. Audio Forensic Examination: Authenticity, Enhancement, and Interpretation. \textit{IEEE Signal Processing Magazine}, v. 26, n. 2, 2009.",
+             r"GRIGORAS, C. Digital Audio Forensics: Recording Analysis, Artifact Detection and Authentication. \textit{International Journal of Digital Crime and Forensics}, 2009."
+        ],
+        "AUDIO_DEEPFAKE": [
+             r"FRANK, J. et al. WaveFake: A Data Set to Facilitate Audio Deepfake Detection. \textit{NeurIPS (Neural Information Processing Systems)}, 2021.",
+             r"MULLER, N. et al. Does Audio Deepfake Detection Generalize? \textit{Interspeech}, 2022."
         ]
     }
 
@@ -233,7 +244,7 @@ class ReportingModule:
         
         for i in range(3):
             # cwd=str(output_dir) é crucial
-            res = subprocess.run(cmd, cwd=str(output_dir), capture_output=True, text=True)
+            res = subprocess.run(cmd, cwd=str(output_dir), capture_output=True, text=True, encoding='utf-8', errors='ignore')
             if res.returncode != 0:
                 if i == 0: continue 
                 raise RuntimeError(f"pdflatex failed (Pass {i+1}): {res.stderr or res.stdout}")
@@ -246,6 +257,9 @@ class ReportingModule:
 \documentclass[a4paper,12pt]{article}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{textcomp}
+\usepackage{float}
 \usepackage[brazil]{babel}
 \usepackage{geometry}
 \usepackage{xcolor}
@@ -402,6 +416,14 @@ class ReportingModule:
                 if proc:
                     latex += r"\subsection{Indícios de Múltiplos Processamentos}"
                     
+                    latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia: Análise de Traços de Processamento]"
+                    latex += r"Investiga o \textit{container} do arquivo (Metadados e Estrutura) em busca de assinaturas digitais deixadas por softwares de edição, re-codificação ou muxing:"
+                    latex += r"\begin{itemize}[leftmargin=1cm]"
+                    latex += r"\item \textbf{Marcas de Software:} Identifica strings características de bibliotecas de edição (ex: FFmpeg, Lavf, Adobe) que não estão presentes em câmeras originais."
+                    latex += r"\item \textbf{Histórico de Criação:} Analisa tags como \textit{compatible\_brands} e \textit{handler\_name} para rastrear a linhagem do arquivo (Filogenia Multimídia)."
+                    latex += r"\end{itemize}"
+                    latex += r"\end{tcolorbox}"
+                    
                     conclusion = esc(proc.get('conclusion', ''))
                     is_detected = proc.get('detected', False)
                     color = "danger" if is_detected else "success"
@@ -413,7 +435,7 @@ class ReportingModule:
                     traces = proc.get('traces_found', [])
                     if traces:
                         latex += r"\subsubsection*{Assinaturas de Software Encontradas}"
-                        latex += r"\begin{longtable}{p{4cm} p{4cm} p{7cm}}"
+                        latex += r"\begin{longtable}{p{3.5cm} p{6.5cm} p{5.5cm}}"
                         latex += r"\toprule \textbf{Origem} & \textbf{Chave} & \textbf{Valor} \\ \midrule "
                         latex += r"\endhead "
                         for t in traces:
@@ -427,98 +449,97 @@ class ReportingModule:
                 if self.config.get('report_gop', True):
                     latex += r"\subsection{Estrutura de Compressão (GOP)}"
                 
-                # Help Box - Expanded
-                latex += r"\begin{tcolorbox}[colback=lightgray,title=O que é GOP (Group of Pictures)?]"
-                latex += r"O \textit{Group of Pictures} (GOP) é a estrutura fundamental da compressão temporal em vídeos. "
-                latex += r"Ele define a distância entre \textbf{I-frames} (quadros de referência completos) e a organização dos quadros preditivos. "
-                latex += r"Alterações anormais na estrutura GOP podem indicar: "
-                latex += r"\begin{itemize}[leftmargin=1cm]"
-                latex += r"\item Recompressão ou re-encoding do vídeo (manipulação)"
-                latex += r"\item Uso de software de edição profissional"
-                latex += r"\item Streaming/upload (plataformas alteram GOP para otimizar transmissão)"
-                latex += r"\end{itemize}"
-                latex += r"\end{tcolorbox}"
-                
-                # Frame type explanations
-                latex += r"\subsubsection*{Tipos de Quadros}"
-                latex += r"\begin{itemize}[leftmargin=1cm]"
-                latex += r"\item \textbf{I-Frames (Intra):} Quadros completos, auto-contidos. Servem como \textit{keyframes} (pontos de referência). São os maiores em tamanho."
-                latex += r"\item \textbf{P-Frames (Preditivos):} Codificam apenas as diferenças em relação ao quadro anterior. Menores que I-frames."
-                latex += r"\item \textbf{B-Frames (Bi-direcionais):} Codificam diferenças em relação a quadros anteriores \textit{e posteriores}. Os menores, mas exigem mais processamento."
-                latex += r"\end{itemize}"
-                
-                # Statistics table
-                total_frames = gop.get('total_frames_analyzed', 0)
-                i_count = gop.get('i_frames', 0)
-                p_count = gop.get('p_frames', 0)
-                b_count = gop.get('b_frames', 0)
-                avg_gop = gop.get('avg_gop_size', 0)
-                
-                latex += r"\subsubsection*{Estatísticas Detectadas}"
-                latex += r"\begin{longtable}{p{7cm} p{3cm} p{5cm}}"
-                latex += r"\toprule \textbf{Métrica} & \textbf{Valor} & \textbf{Referência Típica} \\ \midrule "
-                latex += r"\endhead "
-                
-                latex += f"Total de Frames Analisados & {total_frames} & - \\\\ \\hline \n"
-                
-                # I-frames with interpretation
-                i_percent = (i_count / total_frames * 100) if total_frames > 0 else 0
-                i_ref = r"1-10\% (5-15 frames/seg em 30fps)"
-                i_status = ""
-                if i_percent < 0.5:
-                    i_status = r" \textcolor{danger}{\textbf{ANORMAL - GOP extremamente longo}}"
-                elif i_percent < 2:
-                    i_status = r" \textcolor{warning}{\textbf{Incomum - possível streaming}}"
-                
-                latex += f"I-Frames (Keyframes) & {i_count} ({i_percent:.1f}\\%) & {i_ref}{i_status} \\\\ \\hline \n"
-                
-                # P-frames
-                p_percent = (p_count / total_frames * 100) if total_frames > 0 else 0
-                p_ref = r"30-70\%"
-                latex += f"P-Frames (Preditivos) & {p_count} ({p_percent:.1f}\\%) & {p_ref} \\\\ \\hline \n"
-                
-                # B-frames
-                b_percent = (b_count / total_frames * 100) if total_frames > 0 else 0
-                b_ref = r"20-60\% (ausente em captura simples)"
-                latex += f"B-Frames (Bi-direcionais) & {b_count} ({b_percent:.1f}\\%) & {b_ref} \\\\ \\hline \n"
-                
-                # Average GOP size with interpretation
-                gop_ref = r"10-30 (captura); 60-300 (streaming)"
-                gop_status = ""
-                if avg_gop > 250:
-                    gop_status = r" \textcolor{danger}{\textbf{EXTREMO - typical streaming}}"
-                elif avg_gop > 60:
-                    gop_status = r" \textcolor{warning}{\textbf{Alto - possível plataforma online}}"
-                elif avg_gop < 10:
-                    gop_status = r" \textcolor{warning}{\textbf{Baixo - edição profissional}}"
-                
-                latex += f"Tamanho Médio do GOP & {avg_gop:.2f} & {gop_ref}{gop_status} \\\\ \\hline \n"
-                
-                latex += r"\bottomrule \end{longtable}"
-                
-                # Forensic interpretation
-                latex += r"\subsubsection*{Interpretação Forense}"
-                latex += r"\begin{tcolorbox}[colback=white,colframe=secondary]"
-                
-                if i_count <= 1 and total_frames > 100:
-                    latex += r"\textbf{ALERTA:} GOP extremamente longo detectado (apenas " + str(i_count) + r" I-frame). "
-                    latex += r"Isso é \textbf{altamente incomum} e indica: "
+                    # Help Box - Expanded
+                    latex += r"\begin{tcolorbox}[colback=lightgray,title=O que é GOP (Group of Pictures)?]"
+                    latex += r"O \textit{Group of Pictures} (GOP) é a estrutura fundamental da compressão temporal em vídeos. "
+                    latex += r"Ele define a distância entre \textbf{I-frames} (quadros de referência completos) e a organização dos quadros preditivos. "
+                    latex += r"Alterações anormais na estrutura GOP podem indicar: "
                     latex += r"\begin{itemize}[leftmargin=1cm]"
-                    latex += r"\item \textbf{Streaming de plataforma online} (YouTube, Facebook, etc. usam GOP de 120-300 para otimizar largura de banda)"
-                    latex += r"\item \textbf{Compressão agressiva pós-processamento} (não é padrão de gravação de câmera)"
-                    latex += r"\item \textbf{Possível re-encoding} (vídeo pode ter sido exportado de software de edição)"
+                    latex += r"\item Recompressão ou re-encoding do vídeo (manipulação)"
+                    latex += r"\item Uso de software de edição profissional"
+                    latex += r"\item Streaming/upload (plataformas alteram GOP para otimizar transmissão)"
                     latex += r"\end{itemize}"
-                    latex += r"Vídeos capturados diretamente de câmeras/celulares normalmente têm GOP de 10-30 quadros (I-frame a cada 0.3-1 segundo)."
-                elif avg_gop > 60:
-                    latex += r"GOP elevado detectado. Possível origem: streaming ou software de edição."
-                elif b_count == 0 and total_frames > 50:
-                    latex += r"Ausência de B-frames. Padrão comum em captura direta de dispositivos móveis ou câmeras mais antigas."
-                else:
-                    latex += r"Estrutura GOP dentro de parâmetros típicos para gravação direta."
-                
-                latex += r"\end{tcolorbox}"
-                
-                if self.config.get('report_gop', True):
+                    latex += r"\end{tcolorbox}"
+                    
+                    # Frame type explanations
+                    latex += r"\subsubsection*{Tipos de Quadros}"
+                    latex += r"\begin{itemize}[leftmargin=1cm]"
+                    latex += r"\item \textbf{I-Frames (Intra):} Quadros completos, auto-contidos. Servem como \textit{keyframes} (pontos de referência). São os maiores em tamanho."
+                    latex += r"\item \textbf{P-Frames (Preditivos):} Codificam apenas as diferenças em relação ao quadro anterior. Menores que I-frames."
+                    latex += r"\item \textbf{B-Frames (Bi-direcionais):} Codificam diferenças em relação a quadros anteriores \textit{e posteriores}. Os menores, mas exigem mais processamento."
+                    latex += r"\end{itemize}"
+                    
+                    # Statistics table
+                    total_frames = gop.get('total_frames_analyzed', 0)
+                    i_count = gop.get('i_frames', 0)
+                    p_count = gop.get('p_frames', 0)
+                    b_count = gop.get('b_frames', 0)
+                    avg_gop = gop.get('avg_gop_size', 0)
+                    
+                    latex += r"\subsubsection*{Estatísticas Detectadas}"
+                    latex += r"\begin{longtable}{p{7cm} p{3cm} p{5cm}}"
+                    latex += r"\toprule \textbf{Métrica} & \textbf{Valor} & \textbf{Referência Típica} \\ \midrule "
+                    latex += r"\endhead "
+                    
+                    latex += f"Total de Frames Analisados & {total_frames} & - \\\\ \\hline \n"
+                    
+                    # I-frames with interpretation
+                    i_percent = (i_count / total_frames * 100) if total_frames > 0 else 0
+                    i_ref = r"1-10\% (5-15 frames/seg em 30fps)"
+                    i_status = ""
+                    if i_percent < 0.5:
+                        i_status = r" \textcolor{danger}{\textbf{ANORMAL - GOP extremamente longo}}"
+                    elif i_percent < 2:
+                        i_status = r" \textcolor{warning}{\textbf{Incomum - possível streaming}}"
+                    
+                    latex += f"I-Frames (Keyframes) & {i_count} ({i_percent:.1f}\\%) & {i_ref}{i_status} \\\\ \\hline \n"
+                    
+                    # P-frames
+                    p_percent = (p_count / total_frames * 100) if total_frames > 0 else 0
+                    p_ref = r"30-70\%"
+                    latex += f"P-Frames (Preditivos) & {p_count} ({p_percent:.1f}\\%) & {p_ref} \\\\ \\hline \n"
+                    
+                    # B-frames
+                    b_percent = (b_count / total_frames * 100) if total_frames > 0 else 0
+                    b_ref = r"20-60\% (ausente em captura simples)"
+                    latex += f"B-Frames (Bi-direcionais) & {b_count} ({b_percent:.1f}\\%) & {b_ref} \\\\ \\hline \n"
+                    
+                    # Average GOP size with interpretation
+                    gop_ref = r"10-30 (captura); 60-300 (streaming)"
+                    gop_status = ""
+                    if avg_gop > 250:
+                        gop_status = r" \textcolor{danger}{\textbf{EXTREMO - typical streaming}}"
+                    elif avg_gop > 60:
+                        gop_status = r" \textcolor{warning}{\textbf{Alto - possível plataforma online}}"
+                    elif avg_gop < 10:
+                        gop_status = r" \textcolor{warning}{\textbf{Baixo - edição profissional}}"
+                    
+                    latex += f"Tamanho Médio do GOP & {avg_gop:.2f} & {gop_ref}{gop_status} \\\\ \\hline \n"
+                    
+                    latex += r"\bottomrule \end{longtable}"
+                    
+                    # Forensic interpretation
+                    latex += r"\subsubsection*{Interpretação Forense}"
+                    latex += r"\begin{tcolorbox}[colback=white,colframe=secondary]"
+                    
+                    if i_count <= 1 and total_frames > 100:
+                        latex += r"\textbf{ALERTA:} GOP extremamente longo detectado (apenas " + str(i_count) + r" I-frame). "
+                        latex += r"Isso é \textbf{altamente incomum} e indica: "
+                        latex += r"\begin{itemize}[leftmargin=1cm]"
+                        latex += r"\item \textbf{Streaming de plataforma online} (YouTube, Facebook, etc. usam GOP de 120-300 para otimizar largura de banda)"
+                        latex += r"\item \textbf{Compressão agressiva pós-processamento} (não é padrão de gravação de câmera)"
+                        latex += r"\item \textbf{Possível re-encoding} (vídeo pode ter sido exportado de software de edição)"
+                        latex += r"\end{itemize}"
+                        latex += r"Vídeos capturados diretamente de câmeras/celulares normalmente têm GOP de 10-30 quadros (I-frame a cada 0.3-1 segundo)."
+                    elif avg_gop > 60:
+                        latex += r"GOP elevado detectado. Possível origem: streaming ou software de edição."
+                    elif b_count == 0 and total_frames > 50:
+                        latex += r"Ausência de B-frames. Padrão comum em captura direta de dispositivos móveis ou câmeras mais antigas."
+                    else:
+                        latex += r"Estrutura GOP dentro de parâmetros típicos para gravação direta."
+                    
+                    latex += r"\end{tcolorbox}"
+                    
                     latex = self._add_refs(latex, "GOP")
 
             # --- 5. CONTINUITY ---
@@ -1039,10 +1060,17 @@ class ReportingModule:
                 outliers = noise.get('outliers_detected', 0)
                 map_file = noise.get('map_image')
                 
-                latex += r"\subsection{Análise de Consistência de Ruído}"
+                latex += r"\subsection{Análise de Consistência de Ruído (Análise de Erro de Nível)}"
                 
-                latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia]"
-                latex += r"A imagem é dividida em blocos de 64x64 pixels. Para cada bloco, calculamos a variância e entropia do ruído residual. Desvios significativos (Outliers > 3$\sigma$) indicam regiões que não pertencem à distribuição original (ex: colagens)."
+                latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia Forense]"
+                latex += r"\textbf{Princípio:} Sensores de câmeras digitais imprimem um padrão de ruído estatisticamente uniforme em toda a imagem (PRNU e ruído térmico). Quando uma imagem é manipulada via \textit{splicing} (colagem) ou geração por IA, a região alterada herda características de ruído diferentes da cena original."
+                latex += r"\vspace{0.2cm}"
+                latex += r"\\ \textbf{Procedimento:} A imagem é segmentada em blocos de 64x64 pixels. Para cada bloco, extraímos o resíduo de ruído e calculamos:"
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += r"\item \textbf{Variância do Ruído:} Mede a intensidade da flutuação aleatória. Desvios indicam áreas provenientes de sensores distintos ou processos sintéticos."
+                latex += r"\item \textbf{Entropia de Shannon:} Avalia a complexidade da informação no ruído. Regiões suavizadas por IA ou filtros apresentam entropia anormalmente baixa."
+                latex += r"\item \textbf{Detecção de Outliers:} Blocos com variância superior a 3 desvios padrões (3\sigma) da média global são sinalizados como pontos de interesse pericial."
+                latex += r"\end{itemize}"
                 latex += r"\end{tcolorbox}"
                 
                 if noise.get('status') == 'success':
@@ -1050,9 +1078,9 @@ class ReportingModule:
                     latex += r"\noindent\textbf{Estatísticas Globais de Ruído:}"
                     latex += r"\begin{itemize}"
                     latex += f"\\item \\textbf{{Variância Média:}} {stats.get('mean_variance',0):.2f}"
-                    latex += f"\\item \\textbf{{Desvio Padrão (das Variâncias):}} {stats.get('std_variance',0):.2f}"
-                    latex += f"\\item \\textbf{{Entropia Média:}} {stats.get('mean_entropy',0):.3f}"
-                    latex += f"\\item \\textbf{{Blocos Anômalos (Outliers):}} {outliers} detectados."
+                    latex += f"\\item \\textbf{{Desvio Padrão (Inter-blocos):}} {stats.get('std_variance',0):.2f}"
+                    latex += f"\\item \\textbf{{Entropia Média do Resíduo:}} {stats.get('mean_entropy',0):.3f}"
+                    latex += f"\\item \\textbf{{Blocos Anômalos (Desvios Críticos):}} {outliers} detectados."
                     latex += r"\end{itemize}"
                     
                     # Heatmap
@@ -1061,17 +1089,18 @@ class ReportingModule:
                         latex += r"\begin{figure}[H]"
                         latex += r"\centering"
                         latex += f"\\includegraphics[width=0.85\\textwidth]{{{rel_path}}}"
-                        latex += r"\caption{Mapa de Distribuição de Ruído (JET Colormap)}"
+                        latex += r"\caption{Mapa de Distribuição de Ruído (Analítico de Variância) - JET Colormap}"
                         latex += r"\end{figure}"
                         
                     # Conclusion
                     if outliers > 0:
-                        latex += r"\begin{tcolorbox}[colback=warning!10,title=Alerta de Inconsistência]"
-                        latex += r"Foram detectadas regiões com padrões de ruído estatisticamente divergentes do restante da imagem. Verifique as áreas vermelhas/azuis intensas no mapa acima."
+                        latex += r"\begin{tcolorbox}[colback=warning!10,colframe=warning,title=Alerta de Inconsistência Física]"
+                        latex += r"Foram detectadas regiões com assinaturas de ruído estatisticamente divergentes do corpo principal da imagem. "
+                        latex += r"Conforme o mapa pericial, as áreas com cores nos extremos (Azul Profundo ou Vermelho Intenso) indicam quebra da homogeneidade do sensor, sugerindo manipulação localizada por colagem ou reconstrução sintética."
                         latex += r"\end{tcolorbox}"
                     else:
-                        latex += r"\begin{tcolorbox}[colback=success!10,title=Homogeneidade]"
-                        latex += r"A distribuição de ruído é consistente em toda a imagem. Nenhuma anomalia estatística significativa foi encontrada."
+                        latex += r"\begin{tcolorbox}[colback=success!10,colframe=success,title=Análise de Homogeneidade]"
+                        latex += r"A distribuição de ruído apresenta-se estatisticamente uniforme em toda a extensão do arquivo analisado. Não foram encontrados desvios significativos que indiquem a inserção de elementos externos ou processamento localizado diferenciado."
                         latex += r"\end{tcolorbox}"
                 else:
                      latex += r"\textrm{Erro na análise de ruído: " + esc(noise.get('error','')) + r"}"
@@ -1089,19 +1118,17 @@ class ReportingModule:
             if deepfake_data and deepfake_data.get('status') not in ['error', 'skipped'] and self.config.get('report_deepfake', True):
                 df = deepfake_data
                 
-                latex += r"\subsection{Análise de Deepfake e Consistência Física}"
+                latex += r"\subsection{Detecção de Mídias Sintéticas e Deepfakes}"
                 
-                # Educational foundation
-                latex += r"\begin{tcolorbox}[colback=lightgray,title=O que são Deepfakes e Como Detectamos?]"
-                latex += r"\textbf{Definição:} Deepfakes são mídias sintéticas criadas por redes neurais (GANs - Generative Adversarial Networks) para falsificar rostos, vozes ou eventos. "
-                latex += r"São cada vez mais realistas e representam um desafio crescente na análise forense."
+                latex += r"\begin{tcolorbox}[colback=lightgray,title=Fundamentação Forense e Procedimentos]"
+                latex += r"\textbf{O que é Deepfake?} Trata-se de mídias geradas por algoritmos de inteligência artificial (GANs e Modelos de Difusão) que podem replicar ou alterar faces, vozes e ambientes com alta verossimilhança. "
                 latex += r"\vspace{0.2cm}"
-                latex += r"\textbf{Métodos de Detecção Implementados:}"
+                latex += r"\\ \textbf{Procedimentos de Verificação:} Implementamos quatro camadas de análise para detectar falhas microscópicas inerentes ao processo de síntese:"
                 latex += r"\begin{itemize}[leftmargin=1cm]"
-                latex += r"\item \textbf{Artefatos de Frequência (FFT):} GANs produzem padrões característicos no espectro de frequências, como 'checkerboard artifacts' (xadrez) visíveis como picos anômalos no domínio de Fourier."
-                latex += r"\item \textbf{Textura Facial (LBP):} Faces sintéticas tendem a ter texturas anormalmente suaves/uniformes comparadas a pele humana real, detectável por Local Binary Patterns."
-                latex += r"\item \textbf{Consistência Física:} Verifica se o ruído/ELA da região facial é consistente com o fundo. Em deepfakes, o rosto é gerado separadamente e 'colado', criando descontinuidades."
-                latex += r"\item \textbf{Jitter Temporal (Vídeo):} Deepfakes instáveis exibem variação excessiva de qualidade frame-a-frame, detectável como alta variância estatística temporal."
+                latex += r"\item \textbf{Análise Espectral Multi-canal (FFT):} Modelos generativos criam frequências repetitivas (artefatos de amostragem) que se manifestam como 'picos de energia' no espectro de Fourier. Analisamos não apenas a luminância (Y), mas também a crominância (Cb e Cr), onde modelos modernos costumam deixar rastros mais evidentes."
+                latex += r"\item \textbf{Texture Analysis Multi-escala (LBP):} A pele humana real possui micro-irregularidades estocásticas. Algoritmos de IA tendem a produzir texturas com repetitividade matemática ou suavização excessiva, identificadas via padrões binários locais (LBP) em múltiplas resoluções."
+                latex += r"\item \textbf{Divergência de Consistência Física:} Avalia se a face detém as mesmas propriedades físicas de ruído do cenário de fundo. Deepfakes frequentemente apresentam uma face de alta qualidade inserida em um fundo de baixa fidelidade, gerando uma 'assinatura de ruído dupla'."
+                latex += r"\item \textbf{Instabilidade Temporal (Deepfake Jitter):} Em vídeos, a inconsistência na geração frame-a-frame causa micro-tremores ou variações bruscas de textura que não ocorrem em gravações contínuas autênticas."
                 latex += r"\end{itemize}"
                 latex += r"\end{tcolorbox}"
                 
@@ -1540,7 +1567,286 @@ class ReportingModule:
                     latex += r"\end{tcolorbox}"
                 
                 latex = self._add_refs(latex, "PRNU")
+            
+            # --- AUDIO ANALYSIS SECTION ---
+            audio_data = f_analyses.get('audio_analysis')
+            
+            if audio_data and self.config.get('report_audio_metadata', True):
+                latex += r"\subsection{Análise Forense de Áudio}"
                 
+                if audio_data.get('status') == 'error':
+                     latex += r"\begin{tcolorbox}[colback=danger!10,title=Erro na Análise]"
+                     latex += r"Falha ao executar análise de áudio: " + esc(audio_data.get('error', 'Erro desconhecido'))
+                     latex += r"\end{tcolorbox}"
+                
+                analyses = audio_data.get('analyses', {})
+                
+                # Hash display for Audio
+                file_hash = audio_data.get('file_hash', 'N/A')
+                stream_hash = audio_data.get('stream_hash', 'N/A')
+                
+                latex += r"\subsubsection*{Identificação Digital (Hash)}"
+                latex += r"\begin{tcolorbox}[colback=white,colframe=gray]"
+                latex += r"\textbf{File Hash (Container):} \blackurl{" + str(file_hash) + r"} \\\\"
+                if stream_hash and stream_hash != file_hash:
+                    latex += r"\textbf{Audio Stream Hash:} \blackurl{" + str(stream_hash) + r"}"
+                else:
+                    latex += r"\textit{Nota: O hash do fluxo coincide com o do container ou não foi possível calcular separadamente.}"
+                latex += r"\end{tcolorbox}"
+
+                # METADATA
+                meta = analyses.get('metadata', {})
+                if meta and 'error' not in meta:
+                    latex += r"\subsubsection{Metadados do Áudio}"
+                    latex += r"\begin{longtable}{p{5cm} p{10cm}}"
+                    latex += r"\toprule \textbf{Propriedade} & \textbf{Valor} \\ \midrule "
+                    latex += r"\endhead "
+                    
+                    latex += f"Formato & {esc(str(meta.get('format_long', meta.get('format', 'N/A'))))} \\\\ \\hline \n"
+                    latex += f"Codec & {esc(str(meta.get('codec_long', meta.get('codec', 'N/A'))))} \\\\ \\hline \n"
+                    latex += f"Duração & {meta.get('duration_seconds', 0):.2f}s \\\\ \\hline \n"
+                    latex += f"Bitrate & {meta.get('bitrate_kbps', 0)} kbps \\\\ \\hline \n"
+                    latex += f"Sample Rate & {meta.get('sample_rate', 0)} Hz \\\\ \\hline \n"
+                    latex += f"Canais & {meta.get('channels', 0)} ({esc(str(meta.get('channel_layout', '')))}) \\\\ \\hline \n"
+                    
+                    latex += r"\bottomrule \end{longtable}"
+                    
+                    # Encoder hints
+                    hints = meta.get('encoder_hints', [])
+                    if hints:
+                        latex += r"\subsubsection*{Assinaturas de Software Detectadas}"
+                        latex += r"\begin{tcolorbox}[colback=warning!10,colframe=warning]"
+                        for h in hints:
+                            latex += esc(h) + r" \\\\ "
+                        latex += r"\end{tcolorbox}"
+                    
+                    # Forensic note
+                    note = meta.get('forensic_note', '')
+                    if note:
+                        latex += r"\begin{tcolorbox}[colback=lightgray,title=Nota Forense]"
+                        latex += esc(note)
+                        latex += r"\end{tcolorbox}"
+                
+                # SPECTRAL STATS
+                spectral = analyses.get('spectral', {})
+                if spectral and self.config.get('report_audio_spectral', True):
+                    latex += r"\subsubsection{Estatísticas Espectrais}"
+                    
+                    # Metodologia Explicativa
+                    latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia: Análise Espectral]"
+                    latex += r"Esta análise examina a distribuição estatística da energia nas frequências do áudio para identificar inconsistências decorrentes de manipulação:"
+                    latex += r"\begin{itemize}[leftmargin=1cm]"
+                    latex += r"\item \textbf{Centroide Espectral:} Ponto de equilíbrio do espectro. Mudanças abruptas não naturais indicam possíveis pontos de corte."
+                    latex += r"\item \textbf{Largura de Banda:} Faixa de frequências ocupada. O corte abrupto em altas frequências (ex: $>$16kHz) revela compressão com perdas (MP3/AAC)."
+                    latex += r"\item \textbf{Quedas de Energia:} Silêncios absolutos ou interrupções súbitas no fluxo espectral sugerem deleção de trechos ou perda de pacotes."
+                    latex += r"\end{itemize}"
+                    latex += r"\end{tcolorbox}"
+                    
+                    latex += r"\begin{longtable}{p{6cm} p{9cm}}"
+                    latex += r"\toprule \textbf{Métrica} & \textbf{Valor} \\ \midrule "
+                    latex += r"\endhead "
+                    
+                    cent = spectral.get('centroid_hz', {})
+                    latex += f"Centroide Espectral & {cent.get('mean', 0):.1f} Hz ($\\sigma$={cent.get('std', 0):.1f}) \\\\ \\hline \n"
+                    
+                    bw = spectral.get('bandwidth_hz', {})
+                    latex += f"Largura de Banda & {bw.get('mean', 0):.1f} Hz ($\\sigma$={bw.get('std', 0):.1f}) \\\\ \\hline \n"
+                    
+                    latex += f"Frequência Máxima Útil & {spectral.get('max_useful_frequency_hz', 0)/1000:.1f} kHz \\\\ \\hline \n"
+                    
+                    drops = spectral.get('significant_energy_drops', 0)
+                    drop_color = "danger" if drops > 5 else "black"
+                    latex += f"Quedas Abruptas de Energia & \\textcolor{{{drop_color}}}{{{drops}}} \\\\ \\hline \n"
+                    
+                    latex += r"\bottomrule \end{longtable}"
+                    
+                    note = spectral.get('forensic_note', '')
+                    if note and note != 'Características espectrais dentro do esperado':
+                        latex += r"\begin{tcolorbox}[colback=warning!10,title=Anomalia Espectral Detectada]"
+                        latex += r"\textbf{Interpretação Forense:} O sistema detectou desvios estatísticos significativos que sugerem a presença de edições ou recompressão no arquivo. "
+                        latex += esc(note)
+                        latex += r"\end{tcolorbox}"
+                    
+                    latex = self._add_refs(latex, "AUDIO")
+                
+                # PHASE DISCONTINUITIES
+                phase = analyses.get('phase', {})
+                if phase and self.config.get('report_audio_phase', True):
+                    latex += r"\subsubsection{Detecção de Descontinuidade de Fase}"
+                    
+                    latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia: Análise de Fase]"
+                    latex += r"A fase representa o alinhamento temporal das ondas sonoras. Em uma gravação contínua, a fase evolui suavemente:"
+                    latex += r"\begin{itemize}[leftmargin=1cm]"
+                    latex += r"\item \textbf{Continuidade de Fase:} Cortes e colagens (splicing) criam saltos instantâneos na fase que são matematicamente detectáveis."
+                    latex += r"\item \textbf{Consistência de Rede:} Se presente, o zumbido elétrico serve como marca d'água. Saltos na fase dessa frequência indicam edição."
+                    latex += r"\end{itemize}"
+                    latex += r"\end{tcolorbox}"
+                    
+                    hc = phase.get('high_confidence_count', 0)
+                    color = "danger" if hc > 2 else ("warning" if hc > 0 else "success")
+                    
+                    latex += r"\begin{tcolorbox}[colback=" + color + r"!10,colframe=" + color + r"]"
+                    latex += f"\\textbf{{Descontinuidades de alta confiança detectadas: {hc}}}"
+                    latex += r"\end{tcolorbox}"
+                    
+                    note = phase.get('forensic_note', '')
+                    if note:
+                        latex += r"\noindent " + esc(note)
+                        latex += r"\vspace{0.3cm}"
+                    
+                    discs = phase.get('discontinuities', [])
+                    if discs:
+                        latex += r"\begin{longtable}{p{4cm} p{4cm}}"
+                        latex += r"\toprule \textbf{Tempo (s)} & \textbf{Confiança} \\ \midrule "
+                        latex += r"\endhead "
+                        for d in discs[:10]:
+                            latex += f"{d.get('time_seconds', 0):.3f} & {d.get('confidence', 0)*100:.0f}\\% \\\\ \\hline \n"
+                        latex += r"\bottomrule \end{longtable}"
+                    
+                    latex = self._add_refs(latex, "AUDIO")
+                
+                # SILENCE ANALYSIS
+                silence = analyses.get('silence', {})
+                if silence and self.config.get('report_audio_silence', True):
+                    latex += r"\subsubsection{Detecção de Silêncio Anômalo}"
+                    
+                    latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia: Análise de Ruído e Silêncio]"
+                    latex += r"Analisa a continuidade do ruído de fundo (noise floor). Em gravações de microfone autênticas, o silêncio nunca é absoluto (zero digital) devido ao ruído térmico e ambiental:"
+                    latex += r"\begin{itemize}[leftmargin=1cm]"
+                    latex += r"\item \textbf{Silêncio Digital:} Trechos de amplitude zero (-inf dB) são matematicamente impossíveis em capturas naturais. Indicam deleção (trimming) ou inserção de silêncio sintético."
+                    latex += r"\item \textbf{Descontinuidades de Ruído:} Mudanças abruptas no 'noise floor' sugerem a junção de grampos distintos."
+                    latex += r"\end{itemize}"
+                    latex += r"\end{tcolorbox}"
+                    
+                    # Contexto sobre DTX e Comfort Noise
+                    latex += r"\begin{tcolorbox}[colback=white,colframe=secondary,title=Considerações sobre Telefonia Celular e Gravações de Apps]"
+                    latex += r"\textbf{Telefonia Celular (AMR, EVS, etc.):} Codecs de telefonia utilizam \textit{DTX} (Discontinuous Transmission) para economizar banda. "
+                    latex += r"Durante pausas de silêncio (ex: respiração), o codec transmite frames especiais. Na decodificação, esses silêncios são substituídos por "
+                    latex += r"\textit{Comfort Noise} (ruído sintético gerado por modelo estatístico), \textbf{não por zeros}. Portanto, zeros perfeitos no meio de áudio de telefonia são altamente anômalos."
+                    latex += r"\\[0.2cm]"
+                    latex += r"\textbf{Gravações de Apps Nativos:} Aplicativos de gravação em celular frequentemente inserem zeros no \textbf{início (lead-in)} e \textbf{fim (lead-out)} da gravação. "
+                    latex += r"A duração desses zeros pode variar conforme o SO (Android/iOS), versão e modelo do dispositivo. Esses zeros são comportamento normal e esperado."
+                    latex += r"\end{tcolorbox}"
+                    
+                    # Estatísticas com classificação por posição
+                    digital_middle = silence.get('digital_middle_count', 0)
+                    digital_edge = silence.get('digital_edge_count', 0)
+                    digital_total = silence.get('digital_silence_count', 0)
+                    
+                    # Alerta para zeros no meio (altamente suspeito)
+                    if digital_middle > 0:
+                        latex += r"\begin{tcolorbox}[colback=danger!10,colframe=danger,title=ALERTA: Silêncio Digital no Meio do Áudio]"
+                        latex += f"\\textbf{{{digital_middle}}} segmento(s) de silêncio digital perfeito detectado(s) no \\textbf{{MEIO}} do áudio. "
+                        latex += r"Isso é altamente suspeito de inserção artificial ou manipulação. "
+                        latex += r"Em telefonia celular, silêncios são preenchidos por Comfort Noise (DTX), não por zeros perfeitos. "
+                        latex += r"Em gravações diretas, silêncios reais geram ruído térmico, não zeros matemáticos."
+                        latex += r"\end{tcolorbox}"
+                    
+                    # Informação sobre zeros nas bordas (menos suspeito)
+                    if digital_edge > 0:
+                        latex += r"\begin{tcolorbox}[colback=warning!10,colframe=warning,title=Silêncio Digital no Início/Fim]"
+                        latex += f"\\textbf{{{digital_edge}}} segmento(s) de silêncio digital detectado(s) no início ou fim do áudio. "
+                        latex += r"Este comportamento é \textbf{comum} em gravações de apps nativos de celular (lead-in/lead-out). "
+                        latex += r"A duração desses zeros pode variar conforme SO, versão e modelo do dispositivo."
+                        latex += r"\end{tcolorbox}"
+                    
+                    # Sem silêncio digital
+                    if digital_total == 0:
+                        latex += r"\begin{tcolorbox}[colback=success!10,colframe=success]"
+                        latex += r"Nenhum silêncio digital artificial detectado."
+                        latex += r"\end{tcolorbox}"
+                    
+                    latex += f"\\noindent Total de pausas: {silence.get('silence_count', 0)} ({silence.get('silence_percentage', 0):.1f}\\% do áudio)"
+                    latex += r"\vspace{0.3cm}"
+                    
+                    note = silence.get('forensic_note', '')
+                    if note and note != 'Padrões de silêncio dentro do esperado':
+                        latex += r"\noindent\textit{" + esc(note) + r"}"
+                        latex += r"\vspace{0.3cm}"
+                    
+                    # Tabela de segmentos de silêncio digital
+                    segments = silence.get('segments', [])
+                    digital_segments = [s for s in segments if s.get('is_digital_silence', False)]
+                    
+                    if digital_segments:
+                        latex += r"\subsubsection*{Segmentos de Silêncio Digital Detectados}"
+                        latex += r"\begin{longtable}{c c c c c}"
+                        latex += r"\toprule \textbf{Início (s)} & \textbf{Fim (s)} & \textbf{Duração (s)} & \textbf{Posição} & \textbf{Anomalia} \\ \midrule "
+                        latex += r"\endhead "
+                        
+                        for seg in digital_segments[:15]:  # Limitar a 15 segmentos
+                            start = seg.get('start_seconds', 0)
+                            end = seg.get('end_seconds', 0)
+                            dur = seg.get('duration_seconds', 0)
+                            pos = seg.get('position', 'unknown')
+                            score = seg.get('anomaly_score', 0)
+                            
+                            # Traduzir posição
+                            pos_text = {"start": "Início", "end": "Fim", "middle": "Meio"}.get(pos, pos)
+                            
+                            # Cor baseada no score
+                            score_color = "danger" if score > 0.5 else ("warning" if score > 0.2 else "success")
+                            
+                            latex += f"{start:.3f} & {end:.3f} & {dur:.3f} & {pos_text} & \\textcolor{{{score_color}}}{{{score*100:.0f}\\%}} \\\\ \\hline \n"
+                        
+                        if len(digital_segments) > 15:
+                            latex += f"\\multicolumn{{5}}{{c}}{{\\textit{{... e mais {len(digital_segments) - 15} segmento(s)}}}} \\\\ \\hline\n"
+                        
+                        latex += r"\bottomrule \end{longtable}"
+                        latex += r"\vspace{0.3cm}"
+                    
+                    latex = self._add_refs(latex, "AUDIO")
+            
+            # --- AUDIO DEEPFAKE SECTION ---
+            audio_df = f_analyses.get('audio_deepfake')
+            if audio_df and audio_df.get('status') != 'error' and self.config.get('report_audio_deepfake', True):
+                latex += r"\subsection{Detecção de Áudio Sintético (Deepfake de Voz)}"
+                
+                latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia]"
+                latex += r"Esta análise aplica técnicas heurísticas para detectar características de síntese de voz (TTS, voice cloning):"
+                latex += r"\begin{itemize}[leftmargin=1cm]"
+                latex += r"\item \textbf{Padrões de Mel-Spectrogram:} Detecta uniformidade excessiva e periodicidade artificial."
+                latex += r"\item \textbf{Consistência de Formantes:} Verifica se formantes vocais variam naturalmente."
+                latex += r"\item \textbf{Estabilidade de Pitch:} Tom de voz excessivamente estável indica síntese."
+                latex += r"\item \textbf{Padrões de Pausas:} Micro-pausas de respiração ausentes sugerem TTS."
+                latex += r"\end{itemize}"
+                latex += r"\end{tcolorbox}"
+                
+                # Veredicto
+                score = audio_df.get('overall_score', 0)
+                verdict = audio_df.get('verdict', 'unknown')
+                verdict_text = audio_df.get('verdict_text', '')
+                
+                if verdict == 'highly_suspicious':
+                    color = "danger"
+                elif verdict == 'suspicious':
+                    color = "warning"
+                else:
+                    color = "success"
+                
+                latex += r"\begin{tcolorbox}[colback=" + color + r"!10,colframe=" + color + r",title=Veredicto]"
+                latex += f"\\textbf{{Score Geral: {score*100:.0f}\\%}}"
+                latex += r"\\[0.2cm]"
+                latex += esc(verdict_text)
+                latex += r"\end{tcolorbox}"
+                
+                # Scores table
+                analyses_df = audio_df.get('analyses', {})
+                latex += r"\begin{longtable}{p{6cm} p{3cm} p{6cm}}"
+                latex += r"\toprule \textbf{Análise} & \textbf{Score} & \textbf{Nota} \\ \midrule "
+                latex += r"\endhead "
+                
+                for key, analysis_data in analyses_df.items():
+                    if isinstance(analysis_data, dict):
+                        sc = analysis_data.get('anomaly_score', 0)
+                        note = analysis_data.get('forensic_note', '')
+                        sc_color = "danger" if sc > 0.5 else ("warning" if sc > 0.3 else "success")
+                        latex += f"{esc(key.replace('_', ' ').title())} & \\textcolor{{{sc_color}}}{{{sc*100:.0f}\\%}} & {esc(note[:60])} \\\\ \\hline \n"
+                
+                latex += r"\bottomrule \end{longtable}"
+                
+                latex = self._add_refs(latex, "AUDIO_DEEPFAKE")
+
             latex += r"\newpage"
         
         # --- 8. PRNU MATRIX (GLOBAL) ---
@@ -1635,35 +1941,57 @@ class ReportingModule:
         latex += r"Para fins de auditabilidade e reprodutibilidade, seguem os parâmetros técnicos utilizados pelo software durante o processamento deste caso."
         
         latex += r"\begin{table}[h!]\centering"
-        latex += r"\begin{tabular}{|l|l|}"
+        latex += r"\renewcommand{\arraystretch}{1.3}" # Mais espaço entre linhas
+        latex += r"\begin{tabular}{|p{9cm}|p{6cm}|}"
         latex += r"\hline "
-        latex += r"\textbf{Parâmetro} & \textbf{Valor} \\ \hline "
+        latex += r"\textbf{Parâmetro / Variável} & \textbf{Valor} \\ \hline "
         
-        # Mapeamento amigável
+        # Mapeamento estendido com descrições ricas
         friendly_names = {
-            "copymove_features": "Pontos SIFT (Clonagem)",
-            "copymove_min_cluster": "Rigor (Mínimo Cluster Clonagem)",
-            "resampling_block_size": "Tam. Bloco (Resampling)",
-            "prnu_frame_limit": "Limite de Quadros (PRNU)",
-            "ela_quality": "Qualidade ELA",
-            "deepfake_noise_threshold": "Threshold de Ruído (Deepfake)",
-            "deepfake_jitter_threshold": "Sensibilidade de Jitter",
-            "deepfake_fast_mode": "Modo Rápido (Deepfake)"
+            # Deepfake
+            "deepfake_noise_threshold": "Sensibilidade de Ruído (Splicing)",
+            "deepfake_jitter_threshold": "Tolerância a Instabilidade (Jitter)",
+            "deepfake_fast_mode": "Modo de Análise Rápido",
+            
+            # Image Forensics
+            "copymove_features": "Máximo de Pontos SIFT (Copy-Move)",
+            "copymove_min_cluster": "Mínimo de Clusters (Copy-Move)",
+            "resampling_block_size": "Tamanho de Bloco (Resampling)",
+            "ela_quality": "Qualidade JPEG de Referência (ELA)",
+            
+            # Video
+            "prnu_frame_limit": "Limite de Quadros para PRNU",
+            "scene_threshold": "Sensibilidade de Corte de Cena",
+            
+            # Audio
+            "audio_noise_window": "Janela de Análise de Ruído",
+            "audio_silence_threshold": "Limiar de Silêncio Anômalo (dB)",
+            "audio_segment_duration": "Duração do Segmento de Amostragem",
+            "audio_random_segments": "Qtd. de Segmentos Aleatórios",
+            "audio_silence_margin_seconds": "Margem para Zeros no Início/Fim (s)"
         }
         
-        # Filtrar apenas chaves de parâmetros (ignorar flags de inclusão no relatório)
-        # Sort keys for consistent output
+        # Filtrar apenas chaves de parâmetros (ignorar flags de relatório)
         sorted_keys = sorted(self.config.keys())
+        
         for key in sorted_keys:
             if key.startswith("report_"): continue
             
-            value = self.config[key]
-            name = friendly_names.get(key, key)
-            val_str = "Ativado" if value is True else "Desativado" if value is False else str(value)
-            latex += f"{esc(name)} & {esc(val_str)} \\\\ \\hline \n"
+            val = self.config[key]
+            val_str = "Ativado" if val is True else "Desativado" if val is False else str(val)
+            
+            desc = friendly_names.get(key, "")
+            
+            # Formato: Descrição \newline (nome_variavel)
+            if desc:
+                col1 = f"\\textbf{{{esc(desc)}}} \\newline \\texttt{{\\small ({esc(key)})}}"
+            else:
+                col1 = f"\\texttt{{{esc(key)}}}"
+                
+            latex += f"{col1} & {esc(val_str)} \\\\ \\hline \n"
             
         latex += r"\end{tabular}"
-        latex += r"\caption{Configurações técnicas do motor de análise.}"
+        latex += r"\caption{Parâmetros técnicos configurados para esta análise.}"
         latex += r"\end{table}"
 
         latex += r"\end{document}"
