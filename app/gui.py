@@ -47,7 +47,7 @@ class AnalysisWorker(QThread):
         self.case_name = case_name
         
     def _is_video(self, file_path: Path) -> bool:
-        return file_path.suffix.lower() in ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv']
+        return file_path.suffix.lower() in ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.dav']
     
     def _is_audio(self, file_path: Path) -> bool:
         return file_path.suffix.lower() in ['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.opus']
@@ -365,8 +365,12 @@ class MainWindow(QMainWindow):
         self.browse_btn = QPushButton("Selecionar Arquivos")
         self.browse_btn.clicked.connect(self.browse_file)
         
+        self.browse_folder_btn = QPushButton("Abrir Pasta (Vídeos)")
+        self.browse_folder_btn.clicked.connect(self.browse_folder)
+        
         file_layout.addWidget(self.file_input)
         file_layout.addWidget(self.browse_btn)
+        file_layout.addWidget(self.browse_folder_btn)
         
         self.settings_btn = QPushButton("Configurações")
         self.settings_btn.clicked.connect(self.open_settings)
@@ -399,7 +403,7 @@ class MainWindow(QMainWindow):
     
     def browse_file(self):
         # Permite seleção múltipla
-        filters = "Forensic Files (*.mp4 *.mkv *.avi *.mov *.webm *.flv *.jpg *.jpeg *.png *.tif *.tiff *.webp *.mp3 *.wav *.flac *.ogg *.m4a *.aac *.opus *.wma);;Videos (*.mp4 *.mkv *.avi *.mov *.webm *.flv);;Images (*.jpg *.jpeg *.png *.tif *.tiff *.webp);;Audio (*.mp3 *.wav *.flac *.ogg *.m4a *.aac *.opus *.wma)"
+        filters = "Forensic Files (*.mp4 *.mkv *.avi *.mov *.webm *.flv *.dav *.jpg *.jpeg *.png *.tif *.tiff *.webp *.mp3 *.wav *.flac *.ogg *.m4a *.aac *.opus *.wma);;Videos (*.mp4 *.mkv *.avi *.mov *.webm *.flv *.dav);;Images (*.jpg *.jpeg *.png *.tif *.tiff *.webp);;Audio (*.mp3 *.wav *.flac *.ogg *.m4a *.aac *.opus *.wma)"
         fnames, _ = QFileDialog.getOpenFileNames(self, "Selecionar Arquivos", "", filters)
         if fnames:
             self.selected_files = [Path(f) for f in fnames]
@@ -408,6 +412,50 @@ class MainWindow(QMainWindow):
             else:
                 self.file_input.setText(f"{len(self.selected_files)} arquivos selecionados")
             self.run_btn.setEnabled(True)
+
+    def browse_folder(self):
+        """Abre seletor de pasta e busca recursivamente todos os arquivos de vídeo."""
+        VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.dav'}
+        
+        folder = QFileDialog.getExistingDirectory(self, "Selecionar Pasta com Vídeos")
+        if not folder:
+            return
+        
+        folder_path = Path(folder)
+        
+        # Busca recursiva por arquivos de vídeo
+        video_files = []
+        for ext in VIDEO_EXTENSIONS:
+            video_files.extend(folder_path.rglob(f'*{ext}'))
+            video_files.extend(folder_path.rglob(f'*{ext.upper()}'))
+        
+        # Remover duplicatas (caso ext e EXT capturem o mesmo arquivo) e ordenar
+        video_files = sorted(set(video_files))
+        
+        if not video_files:
+            QMessageBox.warning(
+                self, "Nenhum vídeo encontrado",
+                f"Nenhum arquivo de vídeo foi encontrado em:\n{folder}\n\n"
+                f"Extensões procuradas: {', '.join(sorted(VIDEO_EXTENSIONS))}"
+            )
+            return
+        
+        self.selected_files = video_files
+        self.file_input.setText(f"{len(video_files)} vídeos encontrados em: {folder_path.name}")
+        self.run_btn.setEnabled(True)
+        
+        # Mostrar lista de arquivos encontrados no log
+        self.log_output.clear()
+        self.log_output.append(f"📂 Pasta selecionada: {folder}")
+        self.log_output.append(f"🎬 {len(video_files)} arquivo(s) de vídeo encontrado(s):\n")
+        for vf in video_files:
+            # Mostrar caminho relativo à pasta selecionada
+            try:
+                rel = vf.relative_to(folder_path)
+            except ValueError:
+                rel = vf.name
+            self.log_output.append(f"  • {rel}")
+        self.log_output.append("\n✅ Pronto para iniciar análise.")
 
     def open_settings(self):
         dlg = SettingsDialog(self)
@@ -439,6 +487,7 @@ class MainWindow(QMainWindow):
             
         self.run_btn.setEnabled(False)
         self.browse_btn.setEnabled(False)
+        self.browse_folder_btn.setEnabled(False)
         self.settings_btn.setEnabled(False)
         self.progress_bar.setRange(0, 0) # Indeterminate
         self.log_output.clear()
@@ -472,6 +521,7 @@ class MainWindow(QMainWindow):
     def analysis_finished(self, success, result_path):
         self.run_btn.setEnabled(True)
         self.browse_btn.setEnabled(True)
+        self.browse_folder_btn.setEnabled(True)
         self.settings_btn.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
