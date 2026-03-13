@@ -57,6 +57,7 @@ class AnalysisConfig:
     report_timestamps: bool = True
     report_structure: bool = True
     report_deepfake: bool = True
+    report_individual: bool = False
     
     # Image Report
     report_ela: bool = True

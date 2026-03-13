@@ -35,9 +35,9 @@ import json
 class AnalysisWorker(QThread):
     """Worker para executar a análise em background sem travar a GUI."""
     progress = Signal(str)
+    progress_val = Signal(int)
+    progress_max = Signal(int)
     finished = Signal(bool, str) # success, message
-
-
     
     def __init__(self, input_files: list[Path], output_dir: Path, case_name: str = None, config: dict = None):
         super().__init__()
@@ -45,6 +45,11 @@ class AnalysisWorker(QThread):
         self.output_dir = output_dir
         self.config = config or {}
         self.case_name = case_name
+        self._is_cancelled = False
+        
+    def cancel(self):
+        self._is_cancelled = True
+        self.progress.emit("Cancelamento solicitado. Abortando processo assim que possível...")
         
     def _is_video(self, file_path: Path) -> bool:
         return file_path.suffix.lower() in ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.dav']
@@ -78,6 +83,7 @@ class AnalysisWorker(QThread):
                 case_name = f"case_BATCH_{len(self.input_files)}_FILES_{self.input_files[0].stem}"
                 
             self.progress.emit(f"Iniciando caso: {case_name}")
+            self.progress_max.emit(len(self.input_files))
             
             # Setup com diretório personalizado
             cm = CaseManager(case_name, base_dir=self.output_dir)
@@ -88,221 +94,37 @@ class AnalysisWorker(QThread):
             prnu_fingerprints = [] # List of tuples: (filename, npy_path)
             
             for idx, input_file in enumerate(self.input_files):
+                if self._is_cancelled:
+                    self.progress.emit("ANÁLISE CANCELADA PELO USUÁRIO.")
+                    self.finished.emit(False, "Cancelado")
+                    return
+                    
                 self.progress.emit(f"--- Processando Arquivo {idx+1}/{len(self.input_files)}: {input_file.name} ---")
-                
-                # Prefixos para evitar sobreescrita
-                prefix = f"{idx+1:02d}_{input_file.stem}"
-                
-                # Detectar tipo de arquivo baseado em extensão E conteúdo real
-                is_video_container = self._is_video(input_file)
-                is_audio_file = self._is_audio(input_file)
-                
-                # Para containers de vídeo, verificar se realmente tem stream de vídeo
-                has_video_stream = False
-                if is_video_container:
-                    has_video_stream = self._has_video_stream(input_file)
-                
-                # Definir tipo correto para o manifesto
-                if has_video_stream:
-                    file_type = "video"
-                elif is_video_container or is_audio_file:
-                    file_type = "audio"
-                else:
-                    file_type = "image"
-                
-                # DEBUG: Mostrar classificação do arquivo
-                self.progress.emit(f"[DEBUG] Arquivo: {input_file.name} | is_video_container={is_video_container} | is_audio_file={is_audio_file} | has_video_stream={has_video_stream} | file_type={file_type}")
-                
-                manifest_entry = {
-                    "filename": input_file.name,
-                    "type": file_type,
-                    "analysis_files": {}
-                }
-                
-                if has_video_stream:
-                    # === FLUXO DE VÍDEO ===
-                    
-                    # Nomes de saída
-                    out_fa = f"{prefix}_file_analysis.json"
-                    out_cont = f"{prefix}_continuity.json"
-                    out_comp = f"{prefix}_compression.json"
-                    out_prnu = f"{prefix}_prnu.json"
-                    out_struct = f"{prefix}_structure.json"
-                    out_quant = f"{prefix}_quantization.json"
-                    
-                # === THUMBNAIL GENERATION ===
-                thumb_filename = f"thumb_{input_file.stem}.jpg"
-                thumb_path = cm.results_dir / thumb_filename
+                self.progress_val.emit(idx)
                 
                 try:
-                    if has_video_stream:
-                        # Extract first frame
-                        import subprocess
-                        subprocess.run([
-                            "ffmpeg", "-y", "-i", str(input_file), 
-                            "-vframes", "1", "-update", "1", "-q:v", "2", 
-                            str(thumb_path)
-                        ], check=False, capture_output=True)
-                    elif is_video_container or is_audio_file:
-                        # Arquivo apenas-áudio - sem thumbnail
-                        thumb_filename = None
-                    else:
-                        # Resize image
-                        import cv2
-                        import numpy as np
-                        img_array = np.fromfile(str(input_file), dtype=np.uint8)
-                        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-                        if img is not None:
-                            h, w = img.shape[:2]
-                            if w > 800:
-                                scale = 800 / w
-                                img = cv2.resize(img, (0,0), fx=scale, fy=scale)
-                            is_success, buffer = cv2.imencode(".jpg", img)
-                            if is_success:
-                                with open(thumb_path, "wb") as f:
-                                    f.write(buffer)
-                except Exception as e:
-                    print(f"Thumbnail error: {e}")
-                    thumb_filename = None
+                    self._process_single_file(idx, input_file, batch_manifest, prnu_fingerprints, cm)
+                except Exception as file_err:
+                    self.progress.emit(f"ERRO CRÍTICO no arquivo {input_file.name}: {file_err}. Pulando para o próximo.")
+                    import traceback
+                    traceback.print_exc()
+                    continue
 
-                if thumb_filename:
-                    manifest_entry["thumbnail"] = thumb_filename
+            self.progress_val.emit(len(self.input_files))
 
-                if has_video_stream:
-                    # === FLUXO DE VÍDEO ===
-                    out_fa = f"{prefix}_file_analysis.json"
-                    out_cont = f"{prefix}_continuity.json"
-                    out_struct = f"{prefix}_structure.json"
-                    out_comp = f"{prefix}_compression.json"
-                    out_quant = f"{prefix}_quantization.json"
-                    out_prnu = f"{prefix}_prnu.json"
-                    
-                    # File Analysis
-                    self.progress.emit(f"[{input_file.name}] Análise de Arquivo...")
-                    FileAnalysisModule(cm).run(input_file, output_filename=out_fa)
-                    manifest_entry["analysis_files"]["file_analysis"] = out_fa
-                    
-                    # Continuity
-                    self.progress.emit(f"[{input_file.name}] Análise de Continuidade...")
-                    ContinuityModule(cm).run(input_file, output_filename=out_cont)
-                    manifest_entry["analysis_files"]["continuity_analysis"] = out_cont
+            if self._is_cancelled:
+                self.progress.emit("ANÁLISE CANCELADA (na fase de relatórios).")
+                self.finished.emit(False, "Cancelado")
+                return
 
-                    manifest_entry["analysis_files"]["continuity_analysis"] = out_cont
-
-                    # Structure Analysis (Atom Map)
-                    if getattr(self.config, 'report_structure', True):
-                        self.progress.emit(f"[{input_file.name}] Mapeamento de Estrutura...")
-                        StructureAnalysisModule(cm).run(input_file, output_filename=out_struct)
-                        manifest_entry["analysis_files"]["structure_analysis"] = out_struct
-                    
-                    # Compression Analysis
-                    if getattr(self.config, 'report_benford', True):
-                        self.progress.emit(f"[{input_file.name}] Análise Estatística...")
-                        CompressionAnalysisModule(cm).run(input_file, output_filename=out_comp)
-                        manifest_entry["analysis_files"]["compression_analysis"] = out_comp
-
-                    # Quantization Analysis
-                    if getattr(self.config, 'report_quantization', True):
-                        self.progress.emit(f"[{input_file.name}] Análise de Quantização...")
-                        QuantizationAnalysisModule(cm).run(input_file, output_filename=out_quant)
-                        manifest_entry["analysis_files"]["quantization_analysis"] = out_quant
-                    
-                    # PRNU Analysis (Video)
-                    if getattr(self.config, 'report_prnu', True):
-                        self.progress.emit(f"[{input_file.name}] Análise de Fonte (PRNU)...")
-                        prnu_mod = PrnuAnalysisModule(cm)
-                        prnu_mod.frame_limit = self.config.prnu_frame_limit
-                        prnu_res = prnu_mod.run(input_file, output_filename=out_prnu)
-                        manifest_entry["analysis_files"]["prnu_analysis"] = out_prnu
-                        
-                        if prnu_res.get("status") == "extracted":
-                            prnu_fingerprints.append({
-                                "name": input_file.name,
-                                "path": cm.results_dir / prnu_res["fingerprint_file"]
-                            })
-                            self.progress.emit(f"[DEBUG] PRNU Video coletado: {input_file.name} (total: {len(prnu_fingerprints)})")
-                        else:
-                            self.progress.emit(f"[DEBUG] PRNU Video NÃO extraído: {input_file.name} - status: {prnu_res.get('status')}")
-
-                    # Deepfake Analysis (Video)
-                    if getattr(self.config, 'report_deepfake', True):
-                        self.progress.emit(f"[{input_file.name}] Análise de Deepfake em Vídeo (Jitter Temporal)...")
-                        out_df = f"{prefix}_deepfake_analysis.json"
-                        df_res = DeepfakeAnalysisModule(config=self.config).run_video(input_file)
-                        
-                        with open(cm.results_dir / out_df, 'w', encoding='utf-8') as f:
-                            json.dump(df_res, f, indent=4)
-                        manifest_entry["analysis_files"]["deepfake_analysis"] = out_df
-
-                elif file_type == "image":
-                    # === FLUXO DE IMAGEM ===
-                    out_img = f"{prefix}_image_analysis.json"
-                    
-                    self.progress.emit(f"[{input_file.name}] Análise Forense de Imagem (ELA + Meta + PRNU)...")
-                    img_res = ImageForensicsModule(cm, config=self.config).run(input_file, output_filename=out_img, progress_callback=self.progress.emit)
-                    manifest_entry["analysis_files"]["image_analysis"] = out_img
-                    
-                    # Deepfake Analysis
-                    self.progress.emit(f"[{input_file.name}] Análise de Deepfake/Splicing (Face & Body)...")
-                    out_df = f"{prefix}_deepfake_analysis.json"
-                    df_res = DeepfakeAnalysisModule(config=self.config).run_image(input_file)
-                    
-                    # Salvar resultado deepfake
-                    with open(cm.results_dir / out_df, 'w', encoding='utf-8') as f:
-                        json.dump(df_res, f, indent=4)
-                    manifest_entry["analysis_files"]["deepfake_analysis"] = out_df
-                    
-                    # Coletar Fingerprint do resultado da imagem
-                    prnu_res = img_res.get("prnu_analysis", {})
-                    if prnu_res.get("status") == "extracted":
-                         prnu_fingerprints.append({
-                            "name": input_file.name,
-                            "path": cm.results_dir / prnu_res["fingerprint_file"]
-                        })
-                         self.progress.emit(f"[DEBUG] PRNU Imagem coletado: {input_file.name} (total: {len(prnu_fingerprints)})")
-                    else:
-                         self.progress.emit(f"[DEBUG] PRNU Imagem NÃO extraído: {input_file.name} - status: {prnu_res.get('status')}")
-                
-                # === FLUXO DE ÁUDIO ===
-                # Análise de áudio: para arquivos de áudio puro OU para extrair faixa de áudio de vídeos/containers
-                if is_audio_file or is_video_container:
-                    out_audio = f"{prefix}_audio_analysis.json"
-                    out_audio_df = f"{prefix}_audio_deepfake.json"
-                    
-                    # Análise Forense de Áudio
-                    # Envolto em try/except para não interromper a comparação PRNU se falhar
-                    try:
-                        if getattr(self.config, 'report_audio_metadata', True):
-                            self.progress.emit(f"[{input_file.name}] Análise Forense de Áudio...")
-                            audio_res = AudioForensicsModule(cm, config=self.config).run(
-                                input_file, output_filename=out_audio, progress_callback=self.progress.emit
-                            )
-                            manifest_entry["analysis_files"]["audio_analysis"] = out_audio
-                    except Exception as audio_err:
-                        self.progress.emit(f"[{input_file.name}] AVISO: Falha na análise de áudio: {audio_err}")
-                        print(f"Audio analysis error: {audio_err}")
-                    
-                    # Deepfake de Voz
-                    try:
-                        if getattr(self.config, 'report_audio_deepfake', True):
-                            self.progress.emit(f"[{input_file.name}] Detecção de Deepfake de Voz...")
-                            audio_df_res = AudioDeepfakeModule(cm, config=self.config).run(
-                                input_file, output_filename=out_audio_df, progress_callback=self.progress.emit
-                            )
-                            manifest_entry["analysis_files"]["audio_deepfake"] = out_audio_df
-                    except Exception as audio_df_err:
-                        self.progress.emit(f"[{input_file.name}] AVISO: Falha na detecção de deepfake de voz: {audio_df_err}")
-                        print(f"Audio deepfake error: {audio_df_err}")
-                
-                # Add to manifest list
-                batch_manifest.append(manifest_entry)
+            # Comparação PRNU All-to-All (Vídeos e Imagens)
 
             # Comparação PRNU All-to-All (Vídeos e Imagens)
             self.progress.emit(f"[DEBUG] Total de fingerprints PRNU coletados: {len(prnu_fingerprints)}")
             for fp in prnu_fingerprints:
                 self.progress.emit(f"[DEBUG]   - {fp['name']}: {fp['path']}")
             
-            if len(prnu_fingerprints) > 1:
+            if getattr(self.config, 'report_prnu', True) and len(prnu_fingerprints) > 1:
                 self.progress.emit("Calculando Matriz de Similaridade PRNU (Multimídia)...")
                 comparison_matrix = []
                 
@@ -345,6 +167,213 @@ class AnalysisWorker(QThread):
             import traceback
             traceback.print_exc()
             self.finished.emit(False, str(e))
+                
+    def _process_single_file(self, idx: int, input_file, batch_manifest: list, prnu_fingerprints: list, cm):
+            prefix = f"{idx+1:02d}_{input_file.stem}"
+            
+            # Detectar tipo de arquivo baseado em extensão E conteúdo real
+            is_video_container = self._is_video(input_file)
+            is_audio_file = self._is_audio(input_file)
+            
+            # Para containers de vídeo, verificar se realmente tem stream de vídeo
+            has_video_stream = False
+            if is_video_container:
+                has_video_stream = self._has_video_stream(input_file)
+            
+            # Definir tipo correto para o manifesto
+            if has_video_stream:
+                file_type = "video"
+            elif is_video_container or is_audio_file:
+                file_type = "audio"
+            else:
+                file_type = "image"
+            
+            # DEBUG: Mostrar classificação do arquivo
+            self.progress.emit(f"[DEBUG] Arquivo: {input_file.name} | is_video_container={is_video_container} | is_audio_file={is_audio_file} | has_video_stream={has_video_stream} | file_type={file_type}")
+            
+            manifest_entry = {
+                "filename": input_file.name,
+                "type": file_type,
+                "analysis_files": {}
+            }
+            
+            if has_video_stream:
+                # === FLUXO DE VÍDEO ===
+                
+                # Nomes de saída
+                out_fa = f"{prefix}_file_analysis.json"
+                out_cont = f"{prefix}_continuity.json"
+                out_comp = f"{prefix}_compression.json"
+                out_prnu = f"{prefix}_prnu.json"
+                out_struct = f"{prefix}_structure.json"
+                out_quant = f"{prefix}_quantization.json"
+                
+            # === THUMBNAIL GENERATION ===
+            thumb_filename = f"thumb_{input_file.stem}.jpg"
+            thumb_path = cm.results_dir / thumb_filename
+            
+            try:
+                if has_video_stream:
+                    # Extract first frame
+                    import subprocess
+                    subprocess.run([
+                        "ffmpeg", "-y", "-i", str(input_file), 
+                        "-vframes", "1", "-update", "1", "-q:v", "2", 
+                        str(thumb_path)
+                    ], check=False, capture_output=True)
+                elif is_video_container or is_audio_file:
+                    # Arquivo apenas-áudio - sem thumbnail
+                    thumb_filename = None
+                else:
+                    # Resize image
+                    import cv2
+                    import numpy as np
+                    img_array = np.fromfile(str(input_file), dtype=np.uint8)
+                    img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                    if img is not None:
+                        h, w = img.shape[:2]
+                        if w > 800:
+                            scale = 800 / w
+                            img = cv2.resize(img, (0,0), fx=scale, fy=scale)
+                        is_success, buffer = cv2.imencode(".jpg", img)
+                        if is_success:
+                            with open(thumb_path, "wb") as f:
+                                f.write(buffer)
+            except Exception as e:
+                print(f"Thumbnail error: {e}")
+                thumb_filename = None
+
+            if thumb_filename:
+                manifest_entry["thumbnail"] = thumb_filename
+
+            if has_video_stream:
+                # === FLUXO DE VÍDEO ===
+                out_fa = f"{prefix}_file_analysis.json"
+                out_cont = f"{prefix}_continuity.json"
+                out_struct = f"{prefix}_structure.json"
+                out_comp = f"{prefix}_compression.json"
+                out_quant = f"{prefix}_quantization.json"
+                out_prnu = f"{prefix}_prnu.json"
+                
+                # File Analysis
+                self.progress.emit(f"[{input_file.name}] Análise de Arquivo...")
+                FileAnalysisModule(cm).run(input_file, output_filename=out_fa)
+                manifest_entry["analysis_files"]["file_analysis"] = out_fa
+                
+                # Continuity
+                self.progress.emit(f"[{input_file.name}] Análise de Continuidade...")
+                ContinuityModule(cm).run(input_file, output_filename=out_cont)
+                manifest_entry["analysis_files"]["continuity_analysis"] = out_cont
+
+                manifest_entry["analysis_files"]["continuity_analysis"] = out_cont
+
+                # Structure Analysis (Atom Map)
+                if getattr(self.config, 'report_structure', True):
+                    self.progress.emit(f"[{input_file.name}] Mapeamento de Estrutura...")
+                    StructureAnalysisModule(cm).run(input_file, output_filename=out_struct)
+                    manifest_entry["analysis_files"]["structure_analysis"] = out_struct
+                
+                # Compression Analysis
+                if getattr(self.config, 'report_benford', True):
+                    self.progress.emit(f"[{input_file.name}] Análise Estatística...")
+                    CompressionAnalysisModule(cm).run(input_file, output_filename=out_comp)
+                    manifest_entry["analysis_files"]["compression_analysis"] = out_comp
+
+                # Quantization Analysis
+                if getattr(self.config, 'report_quantization', True):
+                    self.progress.emit(f"[{input_file.name}] Análise de Quantização...")
+                    QuantizationAnalysisModule(cm).run(input_file, output_filename=out_quant)
+                    manifest_entry["analysis_files"]["quantization_analysis"] = out_quant
+                
+                # PRNU Analysis (Video)
+                if getattr(self.config, 'report_prnu', True):
+                    self.progress.emit(f"[{input_file.name}] Análise de Fonte (PRNU)...")
+                    prnu_mod = PrnuAnalysisModule(cm)
+                    prnu_mod.frame_limit = self.config.prnu_frame_limit
+                    prnu_res = prnu_mod.run(input_file, output_filename=out_prnu)
+                    manifest_entry["analysis_files"]["prnu_analysis"] = out_prnu
+                    
+                    if prnu_res.get("status") == "extracted":
+                        prnu_fingerprints.append({
+                            "name": input_file.name,
+                            "path": cm.results_dir / prnu_res["fingerprint_file"]
+                        })
+                        self.progress.emit(f"[DEBUG] PRNU Video coletado: {input_file.name} (total: {len(prnu_fingerprints)})")
+                    else:
+                        self.progress.emit(f"[DEBUG] PRNU Video NÃO extraído: {input_file.name} - status: {prnu_res.get('status')}")
+
+                # Deepfake Analysis (Video)
+                if getattr(self.config, 'report_deepfake', True):
+                    self.progress.emit(f"[{input_file.name}] Análise de Deepfake em Vídeo (Jitter Temporal)...")
+                    out_df = f"{prefix}_deepfake_analysis.json"
+                    df_res = DeepfakeAnalysisModule(config=self.config).run_video(input_file)
+                    
+                    with open(cm.results_dir / out_df, 'w', encoding='utf-8') as f:
+                        json.dump(df_res, f, indent=4)
+                    manifest_entry["analysis_files"]["deepfake_analysis"] = out_df
+
+            elif file_type == "image":
+                # === FLUXO DE IMAGEM ===
+                out_img = f"{prefix}_image_analysis.json"
+                
+                self.progress.emit(f"[{input_file.name}] Análise Forense de Imagem (ELA + Meta + PRNU)...")
+                img_res = ImageForensicsModule(cm, config=self.config).run(input_file, output_filename=out_img, progress_callback=self.progress.emit)
+                manifest_entry["analysis_files"]["image_analysis"] = out_img
+                
+                # Deepfake Analysis
+                self.progress.emit(f"[{input_file.name}] Análise de Deepfake/Splicing (Face & Body)...")
+                out_df = f"{prefix}_deepfake_analysis.json"
+                df_res = DeepfakeAnalysisModule(config=self.config).run_image(input_file)
+                
+                # Salvar resultado deepfake
+                with open(cm.results_dir / out_df, 'w', encoding='utf-8') as f:
+                    json.dump(df_res, f, indent=4)
+                manifest_entry["analysis_files"]["deepfake_analysis"] = out_df
+                
+                # Coletar Fingerprint do resultado da imagem
+                prnu_res = img_res.get("prnu_analysis", {})
+                if prnu_res.get("status") == "extracted":
+                     prnu_fingerprints.append({
+                        "name": input_file.name,
+                        "path": cm.results_dir / prnu_res["fingerprint_file"]
+                    })
+                     self.progress.emit(f"[DEBUG] PRNU Imagem coletado: {input_file.name} (total: {len(prnu_fingerprints)})")
+                else:
+                     self.progress.emit(f"[DEBUG] PRNU Imagem NÃO extraído: {input_file.name} - status: {prnu_res.get('status')}")
+            
+            # === FLUXO DE ÁUDIO ===
+            # Análise de áudio: para arquivos de áudio puro OU para extrair faixa de áudio de vídeos/containers
+            if is_audio_file or is_video_container:
+                out_audio = f"{prefix}_audio_analysis.json"
+                out_audio_df = f"{prefix}_audio_deepfake.json"
+                
+                # Análise Forense de Áudio
+                # Envolto em try/except para não interromper a comparação PRNU se falhar
+                try:
+                    if getattr(self.config, 'report_audio_metadata', True):
+                        self.progress.emit(f"[{input_file.name}] Análise Forense de Áudio...")
+                        audio_res = AudioForensicsModule(cm, config=self.config).run(
+                            input_file, output_filename=out_audio, progress_callback=self.progress.emit
+                        )
+                        manifest_entry["analysis_files"]["audio_analysis"] = out_audio
+                except Exception as audio_err:
+                    self.progress.emit(f"[{input_file.name}] AVISO: Falha na análise de áudio: {audio_err}")
+                    print(f"Audio analysis error: {audio_err}")
+                
+                # Deepfake de Voz
+                try:
+                    if getattr(self.config, 'report_audio_deepfake', True):
+                        self.progress.emit(f"[{input_file.name}] Detecção de Deepfake de Voz...")
+                        audio_df_res = AudioDeepfakeModule(cm, config=self.config).run(
+                            input_file, output_filename=out_audio_df, progress_callback=self.progress.emit
+                        )
+                        manifest_entry["analysis_files"]["audio_deepfake"] = out_audio_df
+                except Exception as audio_df_err:
+                    self.progress.emit(f"[{input_file.name}] AVISO: Falha na detecção de deepfake de voz: {audio_df_err}")
+                    print(f"Audio deepfake error: {audio_df_err}")
+            
+            # Add to manifest list
+            batch_manifest.append(manifest_entry)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -382,11 +411,20 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(file_layout)
         
-        # Botão de Ação
+        # Botões de Ação Dinâmicos
+        action_layout = QHBoxLayout()
         self.run_btn = QPushButton("Iniciar Análise Forense")
         self.run_btn.clicked.connect(self.start_analysis)
         self.run_btn.setEnabled(False)
-        layout.addWidget(self.run_btn)
+        
+        self.cancel_btn = QPushButton("Cancelar Análise")
+        self.cancel_btn.clicked.connect(self.cancel_analysis)
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.setStyleSheet("background-color: #E74C3C; color: white;")
+        
+        action_layout.addWidget(self.run_btn)
+        action_layout.addWidget(self.cancel_btn)
+        layout.addLayout(action_layout)
         
         # Log/Output
         self.log_output = QTextEdit()
@@ -486,10 +524,11 @@ class MainWindow(QMainWindow):
             return # Cancelou ou vazio
             
         self.run_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
         self.browse_btn.setEnabled(False)
         self.browse_folder_btn.setEnabled(False)
         self.settings_btn.setEnabled(False)
-        self.progress_bar.setRange(0, 0) # Indeterminate
+        self.progress_bar.setRange(0, 0) # Indeterminate at first
         self.log_output.clear()
         
         # Load Config
@@ -500,8 +539,16 @@ class MainWindow(QMainWindow):
         # Vamos passar o case_name para o Worker.
         self.worker = AnalysisWorker(self.selected_files, Path(output_dir), case_name=case_name, config=config)
         self.worker.progress.connect(self.update_log)
+        self.worker.progress_max.connect(self.progress_bar.setMaximum)
+        self.worker.progress_val.connect(self.progress_bar.setValue)
         self.worker.finished.connect(self.analysis_finished)
         self.worker.start()
+
+    def cancel_analysis(self):
+        if self.worker and self.worker.isRunning():
+            self.cancel_btn.setEnabled(False)
+            self.cancel_btn.setText("Cancelando...")
+            self.worker.cancel()
 
     def update_log(self, message):
         self.log_output.append(message)
@@ -520,6 +567,8 @@ class MainWindow(QMainWindow):
 
     def analysis_finished(self, success, result_path):
         self.run_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.setText("Cancelar Análise")
         self.browse_btn.setEnabled(True)
         self.browse_folder_btn.setEnabled(True)
         self.settings_btn.setEnabled(True)

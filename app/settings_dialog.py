@@ -261,6 +261,11 @@ class SettingsDialog(QDialog):
         self.chk_rep_df.setChecked(self.config.report_deepfake)
         form_rep.addRow(self.chk_rep_df)
         
+        # Opções GERAIS do Relatório
+        self.chk_rep_indiv = QCheckBox("Gerar Relatório Individual (1 PDF por Arquivo)")
+        self.chk_rep_indiv.setChecked(self.config.report_individual)
+        form_rep.addRow(self.chk_rep_indiv)
+        
         self.chk_rep_ela = QCheckBox("Análise de Nível de Erro - ELA (Imagem)")
         self.chk_rep_ela.setChecked(self.config.report_ela)
         form_rep.addRow(self.chk_rep_ela)
@@ -430,6 +435,7 @@ class SettingsDialog(QDialog):
             report_prnu=self.chk_rep_prnu.isChecked(),
             report_deepfake=self.chk_rep_df.isChecked(),
             report_ela=self.chk_rep_ela.isChecked(),
+            report_individual=self.chk_rep_indiv.isChecked(),
             report_noise=self.chk_rep_noise.isChecked(),
             report_copymove=self.chk_rep_cm.isChecked(),
             report_resampling=self.chk_rep_res.isChecked(),

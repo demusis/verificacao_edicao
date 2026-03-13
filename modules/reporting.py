@@ -45,8 +45,33 @@ class ReportingModule:
         # Coletar dados dos resultados
         data = self._collect_data()
         
-        # Gerar LaTeX Source
-        tex_path = self.cm.report_dir / "report.tex"
+        # Seção para Relatórios Individuais (se habilitado e houver múltiplos arquivos)
+        if getattr(self.config, 'report_individual', False) and len(data.get("files", [])) > 1:
+            for idx, file_entry in enumerate(data.get("files", [])):
+                single_data = {
+                    "case_name": f"{data.get('case_name', 'Caso')} - Análise Individual {idx+1}",
+                    "timestamp": data.get("timestamp"),
+                    "files": [file_entry]
+                }
+                
+                pdf_base_name = f"relatorio_{idx+1:02d}_{Path(file_entry.get('filename', 'arquivo')).stem}"
+                tex_ind_path = self.cm.report_dir / f"{pdf_base_name}.tex"
+                
+                latex_ind_content = self._generate_latex_source(single_data)
+                
+                with open(tex_ind_path, 'w', encoding='utf-8') as f:
+                    f.write(latex_ind_content)
+                self.logger.log("REPORT_INDIVIDUAL_TEX_GENERATED", {"path": str(tex_ind_path)})
+                
+                try:
+                    self._compile_latex(tex_ind_path, self.cm.report_dir)
+                    pdf_ind_path = self.cm.report_dir / f"{pdf_base_name}.pdf"
+                    self.logger.log("REPORT_INDIVIDUAL_PDF_GENERATED", {"path": str(pdf_ind_path)})
+                except Exception as e:
+                    self.logger.log("REPORT_IND_COMP_ERROR", {"file": pdf_base_name, "error": str(e)})
+
+        # Gerar LaTeX Source (Consolidado)
+        tex_path = self.cm.report_dir / "report_consolidado.tex"
         latex_content = self._generate_latex_source(data)
         
         with open(tex_path, 'w', encoding='utf-8') as f:
@@ -54,8 +79,8 @@ class ReportingModule:
         
         self.logger.log("REPORT_TEX_GENERATED", {"path": str(tex_path)})
             
-        # Compilar para PDF
-        pdf_path = self.cm.report_dir / "report.pdf"
+        # Compilar para PDF (Consolidado)
+        pdf_path = self.cm.report_dir / "report_consolidado.pdf"
         try:
             self._compile_latex(tex_path, self.cm.report_dir)
             self.logger.log("REPORT_PDF_GENERATED", {"path": str(pdf_path)})
