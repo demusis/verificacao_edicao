@@ -58,6 +58,7 @@ class AnalysisConfig:
     report_structure: bool = True
     report_deepfake: bool = True
     report_individual: bool = False
+    resume_processing: bool = True
     
     # Image Report
     report_ela: bool = True

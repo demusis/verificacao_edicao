@@ -119,9 +119,18 @@ class AnalysisWorker(QThread):
                 
                 try:
                     # Verifica se deve pular (retomada de processamento)
+                    found_entry = None
                     if input_file.name in processed_files:
+                        found_entry = processed_files[input_file.name]
+                    else:
+                        for k, v in processed_files.items():
+                            if Path(k).stem == input_file.stem:
+                                found_entry = v
+                                break
+
+                    if found_entry:
                         self.progress.emit(f"[{input_file.name}] Pulando... (Já analisado anteriormente)")
-                        entry = processed_files[input_file.name]
+                        entry = found_entry
                         batch_manifest.append(entry)
                         
                         # Restaurar prnu cache para a matriz combinatória final
@@ -139,6 +148,18 @@ class AnalysisWorker(QThread):
                                             })
                                 except Exception:
                                     pass
+                        
+                        # Verificar se precisa gerar o PDF individual pendente (gerado na extração via script)
+                        if getattr(self.config, 'report_individual', False):
+                            pdf_base_name = f"relatorio_{idx+1:02d}_{input_file.stem}"
+                            pdf_ind_path = cm.report_dir / f"{pdf_base_name}.pdf"
+                            if not pdf_ind_path.exists():
+                                self.progress.emit(f"[{input_file.name}] Recuperando e gerando PDF pendente do processamento anterior...")
+                                try:
+                                    ReportingModule(cm, config=self.config).generate_individual(idx, entry)
+                                except Exception as e:
+                                    self.progress.emit(f"[{input_file.name}] Erro ao gerar PDF pendente: {e}")
+                                    
                         continue
                         
                     self._process_single_file(idx, input_file, batch_manifest, prnu_fingerprints, cm)
@@ -442,7 +463,7 @@ class MainWindow(QMainWindow):
         self.browse_btn = QPushButton("Selecionar Arquivos")
         self.browse_btn.clicked.connect(self.browse_file)
         
-        self.browse_folder_btn = QPushButton("Abrir Pasta (Vídeos)")
+        self.browse_folder_btn = QPushButton("Abrir Pasta (Mídia/Forense)")
         self.browse_folder_btn.clicked.connect(self.browse_folder)
         
         file_layout.addWidget(self.file_input)
@@ -500,41 +521,48 @@ class MainWindow(QMainWindow):
             self.run_btn.setEnabled(True)
 
     def browse_folder(self):
-        """Abre seletor de pasta e busca recursivamente todos os arquivos de vídeo."""
-        VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.dav'}
+        """Abre seletor de pasta e busca recursivamente todos os arquivos suportados."""
+        MEDIA_EXTENSIONS = {
+            # Videos
+            '.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.dav',
+            # Images
+            '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.webp',
+            # Audio
+            '.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.opus', '.wma'
+        }
         
-        folder = QFileDialog.getExistingDirectory(self, "Selecionar Pasta com Vídeos")
+        folder = QFileDialog.getExistingDirectory(self, "Selecionar Pasta com Arquivos Forenses")
         if not folder:
             return
         
         folder_path = Path(folder)
         
-        # Busca recursiva por arquivos de vídeo
-        video_files = []
-        for ext in VIDEO_EXTENSIONS:
-            video_files.extend(folder_path.rglob(f'*{ext}'))
-            video_files.extend(folder_path.rglob(f'*{ext.upper()}'))
+        # Busca recursiva por arquivos multimídia
+        media_files = []
+        for ext in MEDIA_EXTENSIONS:
+            media_files.extend(folder_path.rglob(f'*{ext}'))
+            media_files.extend(folder_path.rglob(f'*{ext.upper()}'))
         
         # Remover duplicatas (caso ext e EXT capturem o mesmo arquivo) e ordenar
-        video_files = sorted(set(video_files))
+        media_files = sorted(set(media_files))
         
-        if not video_files:
+        if not media_files:
             QMessageBox.warning(
-                self, "Nenhum vídeo encontrado",
-                f"Nenhum arquivo de vídeo foi encontrado em:\n{folder}\n\n"
-                f"Extensões procuradas: {', '.join(sorted(VIDEO_EXTENSIONS))}"
+                self, "Nenhum arquivo encontrado",
+                f"Nenhum arquivo multimídia foi encontrado em:\n{folder}\n\n"
+                f"Extensões procuradas: {', '.join(sorted(MEDIA_EXTENSIONS))}"
             )
             return
         
-        self.selected_files = video_files
-        self.file_input.setText(f"{len(video_files)} vídeos encontrados em: {folder_path.name}")
+        self.selected_files = media_files
+        self.file_input.setText(f"{len(media_files)} arquivos encontrados em: {folder_path.name}")
         self.run_btn.setEnabled(True)
         
         # Mostrar lista de arquivos encontrados no log
         self.log_output.clear()
         self.log_output.append(f"📂 Pasta selecionada: {folder}")
-        self.log_output.append(f"🎬 {len(video_files)} arquivo(s) de vídeo encontrado(s):\n")
-        for vf in video_files:
+        self.log_output.append(f"🎬 {len(media_files)} arquivo(s) de mídia encontrado(s):\n")
+        for vf in media_files:
             # Mostrar caminho relativo à pasta selecionada
             try:
                 rel = vf.relative_to(folder_path)
