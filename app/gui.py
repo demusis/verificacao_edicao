@@ -104,9 +104,18 @@ class AnalysisWorker(QThread):
                     for entry in existing_manifest:
                         processed_files[entry.get("filename")] = entry
                     if processed_files:
-                        self.progress.emit(f"Foram encontrados {len(processed_files)} arquivos já processados. Retomando (ignorando pre-analisados)...")
+                        self.progress.emit(f"✅ Retomada Ativa: Detectados {len(processed_files)} arquivos já concluídos.")
+                    else:
+                        self.progress.emit("Nenhum arquivo processado anteriormente encontrado nesta pasta.")
                 except Exception as e:
                     self.progress.emit(f"[AVISO] Falha ao carregar manifesto anterior: {e}")
+            
+            total_files = len(self.input_files)
+            already_done = len([f for f in self.input_files if (f.name in processed_files or any(Path(k).stem.lower() == f.stem.lower() for k in processed_files))])
+            remaining = total_files - already_done
+            
+            self.progress.emit(f"📊 Resumo do Lote: {total_files} total | {already_done} já feitos | {remaining} para processar.")
+            self.progress.emit("-" * 40)
 
             for idx, input_file in enumerate(self.input_files):
                 if self._is_cancelled:
@@ -114,22 +123,25 @@ class AnalysisWorker(QThread):
                     self.finished.emit(False, "Cancelado")
                     return
                     
-                self.progress.emit(f"--- Processando Arquivo {idx+1}/{len(self.input_files)}: {input_file.name} ---")
                 self.progress_val.emit(idx)
                 
                 try:
                     # Verifica se deve pular (retomada de processamento)
                     found_entry = None
+                    # Busca exata
                     if input_file.name in processed_files:
                         found_entry = processed_files[input_file.name]
                     else:
+                        # Busca por stem (ignorando extensão e case)
+                        target_stem = input_file.stem.lower()
                         for k, v in processed_files.items():
-                            if Path(k).stem == input_file.stem:
+                            if k and Path(k).stem.lower() == target_stem:
                                 found_entry = v
                                 break
 
                     if found_entry:
-                        self.progress.emit(f"[{input_file.name}] Pulando... (Já analisado anteriormente)")
+                        # Log de Pulo (Saltando)
+                        self.progress.emit(f"[{idx+1}/{total_files}] SALTANDO (Concluído): {input_file.name}")
                         entry = found_entry
                         batch_manifest.append(entry)
                         
@@ -162,6 +174,7 @@ class AnalysisWorker(QThread):
                                     
                         continue
                         
+                    self.progress.emit(f"--- Processando Arquivo {idx+1}/{total_files}: {input_file.name} ---")
                     self._process_single_file(idx, input_file, batch_manifest, prnu_fingerprints, cm)
                     
                     # Salvar manifesto de forma INCREMENTAL para mitigar perda de dados com quedas abruptas
