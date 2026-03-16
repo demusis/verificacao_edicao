@@ -45,31 +45,6 @@ class ReportingModule:
         # Coletar dados dos resultados
         data = self._collect_data()
         
-        # Seção para Relatórios Individuais (se habilitado e houver múltiplos arquivos)
-        if getattr(self.config, 'report_individual', False) and len(data.get("files", [])) > 1:
-            for idx, file_entry in enumerate(data.get("files", [])):
-                single_data = {
-                    "case_name": f"{data.get('case_name', 'Caso')} - Análise Individual {idx+1}",
-                    "timestamp": data.get("timestamp"),
-                    "files": [file_entry]
-                }
-                
-                pdf_base_name = f"relatorio_{idx+1:02d}_{Path(file_entry.get('filename', 'arquivo')).stem}"
-                tex_ind_path = self.cm.report_dir / f"{pdf_base_name}.tex"
-                
-                latex_ind_content = self._generate_latex_source(single_data)
-                
-                with open(tex_ind_path, 'w', encoding='utf-8') as f:
-                    f.write(latex_ind_content)
-                self.logger.log("REPORT_INDIVIDUAL_TEX_GENERATED", {"path": str(tex_ind_path)})
-                
-                try:
-                    self._compile_latex(tex_ind_path, self.cm.report_dir)
-                    pdf_ind_path = self.cm.report_dir / f"{pdf_base_name}.pdf"
-                    self.logger.log("REPORT_INDIVIDUAL_PDF_GENERATED", {"path": str(pdf_ind_path)})
-                except Exception as e:
-                    self.logger.log("REPORT_IND_COMP_ERROR", {"file": pdf_base_name, "error": str(e)})
-
         # Gerar LaTeX Source (Consolidado)
         tex_path = self.cm.report_dir / "report_consolidado.tex"
         latex_content = self._generate_latex_source(data)
@@ -88,6 +63,48 @@ class ReportingModule:
             self.logger.log("REPORT_COMPILATION_ERROR", {"error": str(e)})
             print(f"ERRO AO COMPILAR PDF: {e}")
             print("O arquivo .tex foi gerado e pode ser compilado manualmente.")
+
+    def generate_individual(self, idx: int, manifest_entry: dict):
+        """Gera o PDF individual de um arquivo gradualmente (real-time)."""
+        file_name = manifest_entry.get('filename', 'Unknown')
+        file_entry = {
+            "filename": file_name, 
+            "thumbnail": manifest_entry.get('thumbnail'),
+            "analyses": {}
+        }
+        
+        # Carregar cada JSON de análise referenciado no manifesto
+        for analysis_type, json_filename in manifest_entry.get('analysis_files', {}).items():
+            json_path = self.cm.results_dir / json_filename
+            if json_path.exists():
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as jf:
+                        file_entry["analyses"][analysis_type] = json.load(jf)
+                except Exception as e:
+                    self.logger.log("INDIVIDUAL_DATA_LOAD_ERROR", {"file": json_filename, "error": str(e)})
+
+        single_data = {
+            "case_name": f"{self.cm.case_name} - Análise Individual {idx+1}",
+            "timestamp": get_timestamp_iso(),
+            "files": [file_entry]
+        }
+        
+        pdf_base_name = f"relatorio_{idx+1:02d}_{Path(file_name).stem}"
+        tex_ind_path = self.cm.report_dir / f"{pdf_base_name}.tex"
+        
+        latex_ind_content = self._generate_latex_source(single_data)
+        
+        with open(tex_ind_path, 'w', encoding='utf-8') as f:
+            f.write(latex_ind_content)
+        self.logger.log("REPORT_INDIVIDUAL_TEX_GENERATED", {"path": str(tex_ind_path)})
+        
+        try:
+            self._compile_latex(tex_ind_path, self.cm.report_dir)
+            pdf_ind_path = self.cm.report_dir / f"{pdf_base_name}.pdf"
+            self.logger.log("REPORT_INDIVIDUAL_PDF_GENERATED", {"path": str(pdf_ind_path)})
+        except Exception as e:
+            self.logger.log("REPORT_IND_COMP_ERROR", {"file": pdf_base_name, "error": str(e)})  
+
 
     def _collect_data(self):
         base_data = {

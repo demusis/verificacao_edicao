@@ -93,6 +93,21 @@ class AnalysisWorker(QThread):
             batch_manifest = []
             prnu_fingerprints = [] # List of tuples: (filename, npy_path)
             
+            # --- LÓGICA DE RETOMADA DE PROCESSAMENTO ---
+            manifest_path = cm.results_dir / "batch_manifest.json"
+            processed_files = {}
+            if getattr(self.config, 'resume_processing', True) and manifest_path.exists():
+                self.progress.emit("Procurando processamento anterior para retomar...")
+                try:
+                    with open(manifest_path, 'r', encoding='utf-8') as f:
+                        existing_manifest = json.load(f)
+                    for entry in existing_manifest:
+                        processed_files[entry.get("filename")] = entry
+                    if processed_files:
+                        self.progress.emit(f"Foram encontrados {len(processed_files)} arquivos já processados. Retomando (ignorando pre-analisados)...")
+                except Exception as e:
+                    self.progress.emit(f"[AVISO] Falha ao carregar manifesto anterior: {e}")
+
             for idx, input_file in enumerate(self.input_files):
                 if self._is_cancelled:
                     self.progress.emit("ANÁLISE CANCELADA PELO USUÁRIO.")
@@ -103,7 +118,40 @@ class AnalysisWorker(QThread):
                 self.progress_val.emit(idx)
                 
                 try:
+                    # Verifica se deve pular (retomada de processamento)
+                    if input_file.name in processed_files:
+                        self.progress.emit(f"[{input_file.name}] Pulando... (Já analisado anteriormente)")
+                        entry = processed_files[input_file.name]
+                        batch_manifest.append(entry)
+                        
+                        # Restaurar prnu cache para a matriz combinatória final
+                        prnu_json_name = entry.get("analysis_files", {}).get("prnu_analysis")
+                        if prnu_json_name:
+                            prnu_path = cm.results_dir / prnu_json_name
+                            if prnu_path.exists():
+                                try:
+                                    with open(prnu_path, 'r', encoding='utf-8') as f:
+                                        prnu_data = json.load(f)
+                                        if prnu_data.get("status") == "extracted" and "fingerprint_file" in prnu_data:
+                                            prnu_fingerprints.append({
+                                                "name": input_file.name,
+                                                "path": cm.results_dir / prnu_data["fingerprint_file"]
+                                            })
+                                except Exception:
+                                    pass
+                        continue
+                        
                     self._process_single_file(idx, input_file, batch_manifest, prnu_fingerprints, cm)
+                    
+                    # Salvar manifesto de forma INCREMENTAL para mitigar perda de dados com quedas abruptas
+                    with open(manifest_path, 'w', encoding='utf-8') as mf:
+                        json.dump(batch_manifest, mf, indent=2, ensure_ascii=False)
+                        
+                    # Gerar Relatório Individual imediato (Gradual Release)
+                    if getattr(self.config, 'report_individual', False):
+                        self.progress.emit(f"[{input_file.name}] Gerando PDF de Relatório Individual...")
+                        ReportingModule(cm, config=self.config).generate_individual(idx, batch_manifest[-1])
+
                 except Exception as file_err:
                     self.progress.emit(f"ERRO CRÍTICO no arquivo {input_file.name}: {file_err}. Pulando para o próximo.")
                     import traceback
