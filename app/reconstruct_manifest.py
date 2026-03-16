@@ -8,30 +8,20 @@ def reconstruct_manifest(results_dir: Path):
         print("Pasta não encontrada.")
         return
         
-    # Agrupar arquivos por prefixo (ex: '01', '02')
-    # O prefixo é: f"{idx+1:02d}_{input_file.stem}" e depois "_module.json"
-    # Entao arquivos tem padrão: 01_nomedoarquivo_module.json
-    
-    # Para saber o "nomedoarquivo", procuramos por *_file_analysis.json pois ele
-    # guarda o filename original no seu conteúdo
-    
     entries = {} # Mapeia prefixo -> dict de entry
     
-    for json_file in results_dir.glob("*.json"):
-        if json_file.name == "batch_manifest.json" or json_file.name == "prnu_matrix.json":
+    known_modules = [
+        "file_analysis", "continuity", "compression", "prnu", "prnu_analysis",
+        "structure", "quantization", "image_forensics", "deepfake_analysis",
+        "audio_analysis", "audio_deepfake"
+    ]
+    
+    # Primeiro, listar todos os arquivos JSON e agrupar por prefixo base
+    json_files = list(results_dir.glob("*.json"))
+    for json_file in json_files:
+        if json_file.name in ["batch_manifest.json", "prnu_matrix.json"]:
             continue
             
-        # Tenta extrair o modulo final do nome
-        # Nomes comuns: _file_analysis, _continuity, _compression, _prnu, 
-        # _structure, _quantization, _image_forensics, _deepfake_analysis,
-        # _audio_analysis, _audio_deepfake
-        
-        known_modules = [
-            "file_analysis", "continuity", "compression", "prnu", "prnu_analysis",
-            "structure", "quantization", "image_forensics", "deepfake_analysis",
-            "audio_analysis", "audio_deepfake"
-        ]
-        
         module_type = None
         for mod in known_modules:
             if json_file.name.endswith(f"_{mod}.json"):
@@ -41,7 +31,6 @@ def reconstruct_manifest(results_dir: Path):
         if not module_type:
             continue
             
-        # O prefixo base é o nome sem o `_{module_type}.json`
         base_prefix = json_file.name[:-len(f"_{module_type}.json")]
         
         if base_prefix not in entries:
@@ -51,42 +40,56 @@ def reconstruct_manifest(results_dir: Path):
             }
             
         entries[base_prefix]["analysis_files"][module_type] = json_file.name
-        
-        # Se for file_analysis, abrir pra extrair o nome real do arquivo submetido
-        if module_type == "file_analysis":
-            try:
-                with open(json_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    # No file_analysis.json, root tem file_info -> file_path
-                    if "file_info" in data and "file_path" in data["file_info"]:
-                        original_path = Path(data["file_info"]["file_path"]).name
-                        entries[base_prefix]["filename"] = original_path
-            except Exception as e:
-                print(f"Erro lendo {json_file.name}: {e}")
-                
-    # Agora construimos a lista do manifest
+
+    # Construir lista e tentar identificar nomes de arquivos reais
     manifest_list = []
     
-    # Ordenar por prefixo (que contem o id numérico ex: 01_xxx)
-    sorted_keys = sorted(list(entries.keys()))
+    # Ordenar por prefixo
+    sorted_prefixes = sorted(list(entries.keys()))
+    
+    for prefix in sorted_prefixes:
+        data = entries[prefix]
         
-    for k in sorted_keys:
-        d = entries[k]
+        # Tentar extrair nome original do file_analysis
+        found_filename = None
+        fa_file = data["analysis_files"].get("file_analysis")
+        if fa_file:
+            try:
+                with open(results_dir / fa_file, 'r', encoding='utf-8') as f:
+                    fa_data = json.load(f)
+                    # Tentar vários campos possíveis de metadados
+                    if "metadata" in fa_data and "format" in fa_data["metadata"]:
+                        if "filename" in fa_data["metadata"]["format"]:
+                            found_filename = Path(fa_data["metadata"]["format"]["filename"]).name
+            except:
+                pass
         
-        # Se não achamos o filename via file_analysis, deduzimos do prefixo tirando os números iniciais
-        filename = d.get("filename")
-        if not filename:
-            m = re.match(r'^\d+_(.*?)$', k)
-            filename = m.group(1) if m else k
-            
-        thumb_name = f"thumb_{Path(filename).stem}.jpg"
+        # Fallback: Tirar o prefixo numérico (ex: 01_nomedoarquivo -> nomedoarquivo)
+        if not found_filename:
+            # Padrão: 01_NomeDoArquivo
+            m = re.match(r'^\d+_(.*)$', prefix)
+            if m:
+                found_filename = m.group(1)
+            else:
+                found_filename = prefix
+        
+        # Se o filename ainda parece um thumb ou algo errado, limpar
+        if found_filename.startswith("thumb_"):
+             # Provavelmente é um prefixo de erro ou thumb gerado incorretamente
+             continue
+
+        # Validar se temos pelo menos uma análise mínima (file_analysis) para considerar pronto
+        if "file_analysis" not in data["analysis_files"]:
+            continue
+
+        thumb_name = f"thumb_{Path(found_filename).stem}.jpg"
         if not (results_dir / thumb_name).exists():
             thumb_name = None
             
         manifest_entry = {
-            "filename": filename,
+            "filename": found_filename,
             "thumbnail": thumb_name,
-            "analysis_files": d["analysis_files"]
+            "analysis_files": data["analysis_files"]
         }
         manifest_list.append(manifest_entry)
         
@@ -96,19 +99,9 @@ def reconstruct_manifest(results_dir: Path):
     with open(manifest_path, 'w', encoding='utf-8') as mf:
         json.dump(manifest_list, mf, indent=2, ensure_ascii=False)
         
-    print(f"SALVO. Você pode agora cancelar o script anterior e reiniciar em Resume-mode!")
+    print(f"SALVO. Manifesto com {len(manifest_list)} entradas gerado em {manifest_path}")
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) > 1:
-        path = Path(sys.argv[1])
-        reconstruct_manifest(path)
-    else:
-        # Prompt user
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        folder_selected = filedialog.askdirectory(title="Selecione a pasta 'resultados_nomedocaso' que está sendo processada agora")
-        if folder_selected:
-            reconstruct_manifest(Path(folder_selected))
+    results_path = Path("D:/CFTV-SINOP/analise_2/analise_2/results")
+    reconstruct_manifest(results_path)

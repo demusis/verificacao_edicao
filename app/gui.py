@@ -1,11 +1,12 @@
 import sys
 from pathlib import Path
+import os
+import json
+import socket
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                                QFileDialog, QTextEdit, QProgressBar, QMessageBox)
 from PySide6.QtCore import Qt, QThread, Signal
-
-import os
 
 # Permitir execução direta sem -m
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -102,16 +103,27 @@ class AnalysisWorker(QThread):
                     with open(manifest_path, 'r', encoding='utf-8') as f:
                         existing_manifest = json.load(f)
                     for entry in existing_manifest:
-                        processed_files[entry.get("filename")] = entry
+                        fname = entry.get("filename")
+                        if fname:
+                            processed_files[fname] = entry
+                            # Adicionar também pelo stem para redundância
+                            processed_files[Path(fname).stem.lower()] = entry
+                            
                     if processed_files:
-                        self.progress.emit(f"✅ Retomada Ativa: Detectados {len(processed_files)} arquivos já concluídos.")
+                        self.progress.emit(f"✅ Retomada Ativa: Detectados {len(existing_manifest)} registros de arquivos já concluídos.")
                     else:
                         self.progress.emit("Nenhum arquivo processado anteriormente encontrado nesta pasta.")
                 except Exception as e:
                     self.progress.emit(f"[AVISO] Falha ao carregar manifesto anterior: {e}")
             
             total_files = len(self.input_files)
-            already_done = len([f for f in self.input_files if (f.name in processed_files or any(Path(k).stem.lower() == f.stem.lower() for k in processed_files))])
+            # Contagem robusta
+            already_done_list = []
+            for f in self.input_files:
+                if f.name in processed_files or f.stem.lower() in processed_files:
+                    already_done_list.append(f.name)
+            
+            already_done = len(already_done_list)
             remaining = total_files - already_done
             
             self.progress.emit(f"📊 Resumo do Lote: {total_files} total | {already_done} já feitos | {remaining} para processar.")
@@ -128,16 +140,10 @@ class AnalysisWorker(QThread):
                 try:
                     # Verifica se deve pular (retomada de processamento)
                     found_entry = None
-                    # Busca exata
                     if input_file.name in processed_files:
                         found_entry = processed_files[input_file.name]
-                    else:
-                        # Busca por stem (ignorando extensão e case)
-                        target_stem = input_file.stem.lower()
-                        for k, v in processed_files.items():
-                            if k and Path(k).stem.lower() == target_stem:
-                                found_entry = v
-                                break
+                    elif input_file.stem.lower() in processed_files:
+                        found_entry = processed_files[input_file.stem.lower()]
 
                     if found_entry:
                         # Log de Pulo (Saltando)
@@ -174,12 +180,51 @@ class AnalysisWorker(QThread):
                                     
                         continue
                         
+                    # --- MECANISMO DE CLUSTER (LOCK) ---
+                    # Evita que dois PCs processem o mesmo arquivo simultaneamente em rede local
+                    lock_path = cm.results_dir / f"{idx+1:02d}_{input_file.stem}.lock"
+                    if lock_path.exists():
+                        try:
+                            with open(lock_path, 'r', encoding='utf-8') as lf:
+                                owner = lf.read().strip()
+                            self.progress.emit(f"[{idx+1}/{total_files}] OCUPADO: {input_file.name} (Por {owner})")
+                        except:
+                            self.progress.emit(f"[{idx+1}/{total_files}] OCUPADO: {input_file.name} (Por outro PC)")
+                        continue
+                    
+                    # Tentar travar o arquivo para este PC
+                    try:
+                        with open(lock_path, 'x', encoding='utf-8') as lf:
+                            lf.write(socket.gethostname())
+                    except FileExistsError:
+                        self.progress.emit(f"[{idx+1}/{total_files}] CONFLITO EVITADO: Outro PC acabou de pegar este arquivo")
+                        continue
+                        
                     self.progress.emit(f"--- Processando Arquivo {idx+1}/{total_files}: {input_file.name} ---")
                     self._process_single_file(idx, input_file, batch_manifest, prnu_fingerprints, cm)
                     
-                    # Salvar manifesto de forma INCREMENTAL para mitigar perda de dados com quedas abruptas
-                    with open(manifest_path, 'w', encoding='utf-8') as mf:
-                        json.dump(batch_manifest, mf, indent=2, ensure_ascii=False)
+                    # Salvar manifesto de forma distribuida (RELOAD + MERGE)
+                    try:
+                        import time, random
+                        # Pequeno delay aleatório para reduzir colisões de escrita em rede SMB
+                        time.sleep(random.uniform(0.1, 0.4))
+                        
+                        m_data = []
+                        if manifest_path.exists():
+                            with open(manifest_path, 'r', encoding='utf-8') as mf_read:
+                                m_data = json.load(mf_read)
+                        
+                        # Pegar a última entrada gerada por este PC
+                        new_entry = batch_manifest[-1]
+                        
+                        # Merge: Adicionar apenas se não estiver lá no disco
+                        if not any(e.get('filename') == new_entry['filename'] for e in m_data):
+                            m_data.append(new_entry)
+                            
+                            with open(manifest_path, 'w', encoding='utf-8') as mf_write:
+                                json.dump(m_data, mf_write, indent=2, ensure_ascii=False)
+                    except Exception as e:
+                        self.progress.emit(f"AVISO: Falha ao sincronizar manifesto global: {e}")
                         
                     # Gerar Relatório Individual imediato (Gradual Release)
                     if getattr(self.config, 'report_individual', False):
@@ -232,17 +277,37 @@ class AnalysisWorker(QThread):
             else:
                 self.progress.emit(f"[DEBUG] Comparação PRNU pulada: apenas {len(prnu_fingerprints)} fingerprint(s) coletado(s). Precisa de pelo menos 2.")
             
-            # Salvar Manifesto
+            # Salvar Manifesto Final (Sincronizado para Cluster)
             manifest_path = cm.results_dir / "batch_manifest.json"
-            with open(manifest_path, 'w', encoding='utf-8') as mf:
-                json.dump(batch_manifest, mf, indent=2, ensure_ascii=False)
-            
-            # Reporting
-            self.progress.emit("Gerando Relatório Unificado (LaTeX)...")
-            ReportingModule(cm, config=self.config).generate()
-            
-            self.progress.emit(f"Concluído! Relatório em: {cm.report_dir}")
-            self.finished.emit(True, str(cm.report_dir))
+            final_data = []
+            try:
+                if manifest_path.exists():
+                    with open(manifest_path, 'r', encoding='utf-8') as mf_read:
+                        final_data = json.load(mf_read)
+                
+                # Merge com o que este nó produziu/pulou
+                for e_mem in batch_manifest:
+                    if not any(e_disk.get('filename') == e_mem['filename'] for e_disk in final_data):
+                        final_data.append(e_mem)
+                
+                with open(manifest_path, 'w', encoding='utf-8') as mf_write:
+                    json.dump(final_data, mf_write, indent=2, ensure_ascii=False)
+            except:
+                final_data = batch_manifest # Fallback
+
+            # Reporting - Tenta gerar o consolidado FINAL se parecer que o lote acabou
+            if len(final_data) >= total_files:
+                self.progress.emit("Gerando Relatório Unificado de Finalização (Lote Completo)...")
+                try:
+                    ReportingModule(cm, config=self.config).generate()
+                except Exception as rep_err:
+                    self.progress.emit(f"Erro no Report Final: {rep_err}")
+                self.progress.emit(f"Processamento concluído com sucesso! Relatórios em: {cm.report_dir}")
+                self.finished.emit(True, str(cm.report_dir))
+            else:
+                self.progress.emit(f"Trabalho parcial deste nó concluído ({len(batch_manifest)}/{total_files}).")
+                self.progress.emit("Aguardando finalização dos outros nós para o relatório consolidado.")
+                self.finished.emit(True, "Parcial")
             
         except Exception as e:
             self.progress.emit(f"ERRO: {str(e)}")
