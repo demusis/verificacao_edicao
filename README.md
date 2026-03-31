@@ -1,6 +1,6 @@
 # VerificacaoEdicao - Análise Forense de Multimídia
 
-**Versão:** 1.0.17 | **Data:** 2026-02-06  
+**Versão:** 1.4.1 | **Data:** 2026-03-20  
 **Desenvolvimento:** Gerência de Perícias em Áudio e Vídeo (GPAV) / POLITEC-MT
 
 Ferramenta profissional e auditável para **Análise Forense de Multimídia (Vídeo, Imagem e Áudio)**, projetada para detectar indícios de edição, adulteração, deepfakes e recompressão em arquivos digitais.
