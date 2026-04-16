@@ -18,3 +18,4 @@ decorator
 joblib
 pooch
 lazy_loader
+psutil

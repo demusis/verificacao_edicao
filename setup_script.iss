@@ -3,7 +3,7 @@
 
 #define MyAppName "VerificacaoEdicao"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0"
+  #define MyAppVersion "1.4.1"
 #endif
 #define MyAppPublisher "VerificacaoEdicao"
 #define MyAppExeName "VerificacaoEdicao.exe"

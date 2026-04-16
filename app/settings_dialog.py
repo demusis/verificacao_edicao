@@ -401,6 +401,105 @@ class SettingsDialog(QDialog):
         
         tabs.addTab(tab_audio, "Análise de Áudio")
         
+        # --- TAB: Cluster / Rede ---
+        tab_cluster = QWidget()
+        form_cluster = QFormLayout(tab_cluster)
+        
+        self.spin_retry_interval = QSpinBox()
+        self.spin_retry_interval.setRange(10, 600)
+        self.spin_retry_interval.setSingleStep(10)
+        self.spin_retry_interval.setValue(getattr(self.config, 'retry_interval_seconds', 60))
+        self.spin_retry_interval.setSuffix(" s")
+        
+        msg_retry_int = (
+            "<b>Intervalo de Reconexão (segundos)</b><br><br>"
+            "Quando a conexão com os arquivos na rede cair (ex: Google Drive,<br>"
+            "pasta compartilhada), o sistema pausa e tenta reconectar<br>"
+            "automaticamente neste intervalo.<br><br>"
+            "<ul>"
+            "<li><b>30s:</b> Tentativas rápidas, bom para quedas breves.</li>"
+            "<li><b>60s:</b> Padrão, equilíbrio entre velocidade e carga.</li>"
+            "<li><b>300s:</b> Para redes instáveis com quedas longas.</li>"
+            "</ul>"
+        )
+        add_param(form_cluster, "Intervalo de Reconexão:", self.spin_retry_interval, msg_retry_int)
+        
+        self.spin_retry_max = QSpinBox()
+        self.spin_retry_max.setRange(1, 100)
+        self.spin_retry_max.setValue(getattr(self.config, 'retry_max_attempts', 10))
+        
+        msg_retry_max = (
+            "<b>Máximo de Tentativas</b><br><br>"
+            "Quantas vezes o sistema tentará reconectar antes de desistir<br>"
+            "e parar o processamento.<br><br>"
+            "<ul>"
+            "<li><b>5:</b> Desiste rápido (ex: 5 × 60s = 5 min).</li>"
+            "<li><b>10:</b> Padrão (ex: 10 × 60s = 10 min).</li>"
+            "<li><b>60:</b> Persistente (ex: 60 × 60s = 1 hora).</li>"
+            "</ul>"
+        )
+        add_param(form_cluster, "Máximo de Tentativas:", self.spin_retry_max, msg_retry_max)
+        
+        # --- Separador visual ---
+        from PySide6.QtWidgets import QLineEdit, QGroupBox
+        
+        sep_label = QLabel("<hr><b>📂 Cópia Local de Arquivos</b>")
+        form_cluster.addRow(sep_label)
+        
+        self.chk_local_copy = QCheckBox("Copiar arquivos para pasta local antes de processar")
+        self.chk_local_copy.setChecked(getattr(self.config, 'local_copy_enabled', False))
+        
+        msg_local_copy = (
+            "<b>Cópia Local Temporária</b><br><br>"
+            "Quando habilitado, o sistema copia cada arquivo da rede para<br>"
+            "uma pasta local <b>antes</b> de processar. Isso evita gargalos<br>"
+            "de leitura em rede (SMB, Google Drive, etc.).<br><br>"
+            "<ul>"
+            "<li><b>Vantagem:</b> Processamento muito mais rápido em redes lentas.</li>"
+            "<li><b>Desvantagem:</b> Precisa de espaço livre no disco local.</li>"
+            "</ul><br>"
+            "O arquivo local é <b>apagado automaticamente</b> após o processamento."
+        )
+        add_param(form_cluster, "Otimização de I/O:", self.chk_local_copy, msg_local_copy)
+        
+        # Pasta local
+        local_dir_layout = QHBoxLayout()
+        self.txt_local_copy_dir = QLineEdit()
+        self.txt_local_copy_dir.setPlaceholderText("(vazio = pasta temporária do sistema)")
+        self.txt_local_copy_dir.setText(getattr(self.config, 'local_copy_dir', ''))
+        
+        btn_browse_local = QPushButton("📁")
+        btn_browse_local.setMaximumWidth(40)
+        btn_browse_local.setToolTip("Selecionar pasta local")
+        
+        from PySide6.QtWidgets import QFileDialog as _QFD
+        btn_browse_local.clicked.connect(
+            lambda: self._browse_local_dir()
+        )
+        
+        btn_clear_local = QPushButton("✕")
+        btn_clear_local.setMaximumWidth(30)
+        btn_clear_local.setToolTip("Limpar (usar pasta temp do sistema)")
+        btn_clear_local.clicked.connect(lambda: self.txt_local_copy_dir.clear())
+        
+        local_dir_layout.addWidget(self.txt_local_copy_dir)
+        local_dir_layout.addWidget(btn_browse_local)
+        local_dir_layout.addWidget(btn_clear_local)
+        
+        local_dir_widget = QWidget()
+        local_dir_widget.setLayout(local_dir_layout)
+        
+        msg_local_dir = (
+            "<b>Pasta Local para Cópia</b><br><br>"
+            "Escolha uma pasta no disco local (SSD recomendado) para<br>"
+            "armazenar temporariamente os arquivos durante o processamento.<br><br>"
+            "Se deixar vazio, será usada a pasta temporária do sistema<br>"
+            "(ex: <code>C:\\Users\\...\\AppData\\Local\\Temp</code>)."
+        )
+        add_param(form_cluster, "Pasta Local:", local_dir_widget, msg_local_dir)
+        
+        tabs.addTab(tab_cluster, "Cluster / Rede")
+        
         layout.addWidget(tabs)
         
         # Buttons
@@ -456,7 +555,22 @@ class SettingsDialog(QDialog):
             report_audio_phase=self.chk_rep_audio_phase.isChecked(),
             report_audio_silence=self.chk_rep_audio_silence.isChecked(),
             report_audio_deepfake=self.chk_rep_audio_df.isChecked(),
+            # Cluster / Rede
+            retry_interval_seconds=self.spin_retry_interval.value(),
+            retry_max_attempts=self.spin_retry_max.value(),
+            local_copy_enabled=self.chk_local_copy.isChecked(),
+            local_copy_dir=self.txt_local_copy_dir.text().strip(),
         )
         
         self._save_config()
         self.accept()
+
+    def _browse_local_dir(self):
+        """Abre diálogo para selecionar pasta local de cópia temporária."""
+        from PySide6.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(
+            self, "Selecionar Pasta Local para Cópia Temporária",
+            self.txt_local_copy_dir.text() or ""
+        )
+        if folder:
+            self.txt_local_copy_dir.setText(folder)

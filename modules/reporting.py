@@ -106,6 +106,281 @@ class ReportingModule:
             self.logger.log("REPORT_IND_COMP_ERROR", {"file": pdf_base_name, "error": str(e)})  
 
 
+    def generate_prnu_comparison(self, comparison_data: dict):
+        """Gera relatório PDF de comparação PRNU entre arquivos externos e existentes."""
+        esc = self._escape_latex
+        
+        timestamp = comparison_data.get('timestamp', get_timestamp_iso())
+        external_files = comparison_data.get('external_files', [])
+        existing_files = comparison_data.get('existing_files', [])
+        results = comparison_data.get('results', [])
+        
+        latex = r"""
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{textcomp}
+\usepackage{float}
+\usepackage[brazil]{babel}
+\usepackage{geometry}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{tcolorbox}
+\usepackage{fancyhdr}
+\usepackage{xurl}
+
+\newcommand{\rowcolor}[1]{}
+\newcommand{\blackurl}[1]{{\hypersetup{urlcolor=black}\url{#1}}}
+
+\definecolor{primary}{HTML}{2C3E50}
+\definecolor{secondary}{HTML}{3498DB}
+\definecolor{accent}{HTML}{E67E22}
+\definecolor{lightgray}{HTML}{ECF0F1}
+\definecolor{success}{HTML}{2ECC71}
+\definecolor{danger}{HTML}{E74C3C}
+\definecolor{warning}{HTML}{F1C40F}
+
+\geometry{top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=primary,
+    filecolor=secondary,
+    urlcolor=secondary,
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small \textcolor{gray}{Relatório de Comparação PRNU}}
+\rhead{}
+\cfoot{\thepage}
+
+\title{\textbf{\textcolor{primary}{Relatório de Comparação PRNU\\(Identificação de Fonte)}}}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section*{Resumo do Protocolo}
+\begin{tcolorbox}[colback=lightgray,colframe=primary,title=Identificação]
+\textbf{Tipo:} Comparação Direcionada de PRNU \\
+\textbf{Caso:} """ + esc(self.cm.case_name) + r""" \\
+\textbf{Data da Análise:} """ + self._format_date(timestamp) + r""" \\
+\textbf{Arquivos Investigados:} """ + str(len(external_files)) + r""" \\
+\textbf{Arquivos de Referência:} """ + str(len(existing_files)) + r"""
+\end{tcolorbox}
+
+\tableofcontents
+\newpage
+"""
+        # --- Metodologia ---
+        latex += r"\section{Metodologia}"
+        latex += r"\begin{tcolorbox}[colback=lightgray,title=Metodologia Forense (PRNU)]"
+        latex += r"\textbf{Fingerprint de Sensor:} O PRNU (\textit{Photo Response Non-Uniformity}) é um ruído imperceptível e único gerado pelas imperfeições físicas na fabricação do sensor de cada câmera. "
+        latex += r"Ele funciona como uma 'impressão digital digital' da câmera."
+        latex += r"\vspace{0.2cm}"
+        latex += r"\\ \textbf{Correlação PCE:} A comparação utiliza a métrica \textbf{PCE} (\textit{Peak-to-Correlation Energy}). "
+        latex += r"Calculamos o quanto o ruído de um arquivo se alinha estatisticamente com o de outro. Valores altos provam cientificamente que as mídias foram gravadas pelo mesmo dispositivo físico."
+        latex += r"\end{tcolorbox}"
+        
+        latex += r"\begin{tcolorbox}[colback=white,colframe=secondary,title=Interpretação dos Valores PCE]"
+        latex += r"A confiabilidade da identificação de fonte baseia-se nos seguintes limiares técnicos:"
+        latex += r"\begin{itemize}[leftmargin=1cm]"
+        latex += r"\item \textbf{PCE > 60:} \textbf{MATCH POSITIVO.} Fortíssima evidência de mesma origem. A probabilidade de erro (falso positivo) é estatisticamente desprezível."
+        latex += r"\item \textbf{PCE 40 - 60:} \textbf{Indício Forte.} Alta probabilidade de mesma origem, mas recomendável buscar evidências complementares (ex: metadados)."
+        latex += r"\item \textbf{PCE < 40:} \textbf{Inconclusivo.} O ruído pode estar muito degradado por compressão agressiva, redimensionamento ou falta de luz, impedindo a correlação segura."
+        latex += r"\end{itemize}"
+        latex += r"\vspace{0.2cm}"
+        latex += r"\textbf{Nota sobre Resize:} Se os arquivos têm resoluções diferentes, o sistema redimensiona os fingerprints para permitir a comparação. Isso pode reduzir o score PCE e é sinalizado com um asterisco (*)."
+        latex += r"\end{tcolorbox}"
+        
+        latex = self._add_refs(latex, "PRNU")
+        
+        # --- Legenda de Arquivos ---
+        latex += r"\section{Identificação dos Arquivos}"
+        
+        latex += r"\subsection*{Arquivos Investigados (Externos)}"
+        latex += r"\begin{tabular}{l p{12cm}}"
+        latex += r"\toprule \textbf{ID} & \textbf{Arquivo} \\ \midrule "
+        for i, fname in enumerate(external_files):
+            fname_clean = r"\blackurl{" + str(fname) + r"}"
+            latex += f"E{i+1} & {fname_clean} \\\\ \n"
+        latex += r"\bottomrule \end{tabular}"
+        
+        latex += r"\vspace{0.5cm}"
+        
+        latex += r"\subsection*{Arquivos de Referência (Diretório de Trabalho)}"
+        latex += r"\begin{longtable}{l p{12cm}}"
+        latex += r"\toprule \textbf{ID} & \textbf{Arquivo} \\ \midrule "
+        latex += r"\endhead "
+        for i, fname in enumerate(existing_files):
+            fname_clean = r"\blackurl{" + str(fname) + r"}"
+            latex += f"R{i+1} & {fname_clean} \\\\ \n"
+        latex += r"\bottomrule \end{longtable}"
+        
+        # --- Resultados ---
+        latex += r"\section{Resultados da Comparação}"
+        
+        # Tabela resumo
+        latex += r"\subsection{Tabela Geral de Comparações (PCE)}"
+        latex += r"\begin{longtable}{c c c l}"
+        latex += r"\toprule \textbf{Investigado} & \textbf{Referência} & \textbf{Score PCE} & \textbf{Resultado} \\ \midrule "
+        latex += r"\endhead "
+        
+        has_any_match = False
+        
+        for res_entry in results:
+            ext_name = res_entry.get("external_file", "?")
+            ext_idx = (external_files.index(ext_name) + 1) if ext_name in external_files else "?"
+            
+            for comp in res_entry.get("comparisons", []):
+                exist_name = comp.get("existing_file", "?")
+                exist_idx = (existing_files.index(exist_name) + 1) if exist_name in existing_files else "?"
+                
+                pce = comp.get("pce", 0)
+                match = comp.get("match", False)
+                note = comp.get("scaling_note")
+                error = comp.get("error")
+                
+                if error:
+                    pce_str = "Erro"
+                    result_str = esc(str(error)[:30])
+                    result_color = "black"
+                else:
+                    pce_str = f"{pce:.1f}"
+                    if note:
+                        pce_str += "*"
+                    
+                    if match:
+                        result_str = r"\textbf{MATCH}"
+                        result_color = "success"
+                        has_any_match = True
+                    elif pce > 40:
+                        result_str = r"\textbf{Indício Forte}"
+                        result_color = "warning"
+                    else:
+                        result_str = "Inconclusivo"
+                        result_color = "black"
+                
+                latex += f"E{ext_idx} & R{exist_idx} & {pce_str} & \\textcolor{{{result_color}}}{{{result_str}}} \\\\ \\hline \n"
+        
+        latex += r"\bottomrule \end{longtable}"
+        latex += r"\vspace{0.2cm}"
+        latex += r"\small \textit{* Asterisco indica redimensionamento de fingerprint para compatibilizar resoluções distintas.}"
+        
+        # --- Detalhamento por arquivo investigado ---
+        latex += r"\subsection{Detalhamento por Arquivo Investigado}"
+        
+        for res_entry in results:
+            ext_name = res_entry.get("external_file", "?")
+            
+            latex += f"\\subsubsection{{\\blackurl{{{ext_name}}}}}"
+            
+            comparisons = res_entry.get("comparisons", [])
+            
+            # Ordenar por PCE decrescente
+            sorted_comps = sorted(comparisons, key=lambda x: x.get("pce", 0), reverse=True)
+            
+            if sorted_comps:
+                best = sorted_comps[0]
+                best_pce = best.get("pce", 0)
+                best_match = best.get("match", False)
+                best_name = best.get("existing_file", "?")
+                
+                if best_match:
+                    latex += r"\begin{tcolorbox}[colback=success!10,colframe=success,title=\textbf{MATCH Identificado}]"
+                    latex += f"\\textbf{{Maior correlação:}} \\blackurl{{{best_name}}} com PCE = \\textbf{{{best_pce:.1f}}}. "
+                    latex += r"Forte evidência de que ambos os arquivos foram capturados pelo \textbf{mesmo dispositivo físico}."
+                    latex += r"\end{tcolorbox}"
+                elif best_pce > 40:
+                    latex += r"\begin{tcolorbox}[colback=warning!10,colframe=warning,title=Indício Encontrado]"
+                    latex += f"\\textbf{{Maior correlação:}} \\blackurl{{{best_name}}} com PCE = \\textbf{{{best_pce:.1f}}}. "
+                    latex += r"Há indício de mesma origem, mas o score não atinge o limiar de certeza (60)."
+                    latex += r"\end{tcolorbox}"
+                else:
+                    latex += r"\begin{tcolorbox}[colback=lightgray,colframe=gray,title=Nenhum Match Identificado]"
+                    latex += f"\\textbf{{Maior correlação:}} \\blackurl{{{best_name}}} com PCE = \\textbf{{{best_pce:.1f}}}. "
+                    latex += r"Nenhum dos arquivos de referência apresentou correlação significativa com este arquivo."
+                    latex += r"\end{tcolorbox}"
+            
+            # Tabela ranking
+            latex += r"\begin{longtable}{c l c l}"
+            latex += r"\toprule \textbf{Rank} & \textbf{Arquivo de Referência} & \textbf{PCE} & \textbf{Status} \\ \midrule "
+            latex += r"\endhead "
+            
+            for rank, comp in enumerate(sorted_comps, 1):
+                exist_name = comp.get("existing_file", "?")
+                pce = comp.get("pce", 0)
+                match = comp.get("match", False)
+                note = comp.get("scaling_note")
+                
+                pce_str = f"{pce:.1f}"
+                if note:
+                    pce_str += "*"
+                
+                if match:
+                    status = r"\textcolor{success}{\textbf{MATCH}}"
+                elif pce > 40:
+                    status = r"\textcolor{warning}{\textbf{Indício}}"
+                else:
+                    status = "Inconclusivo"
+                
+                latex += f"{rank} & \\blackurl{{{exist_name}}} & {pce_str} & {status} \\\\ \\hline \n"
+            
+            latex += r"\bottomrule \end{longtable}"
+        
+        # --- Conclusão Geral ---
+        latex += r"\section{Conclusão}"
+        
+        if has_any_match:
+            latex += r"\begin{tcolorbox}[colback=success!10,colframe=success,title=Conclusão Geral]"
+            latex += r"\textbf{Match(es) positivo(s) identificado(s).} "
+            latex += r"Um ou mais arquivos investigados apresentaram forte correlação PRNU com arquivos de referência, "
+            latex += r"indicando com alto grau de confiança que foram capturados pelo mesmo dispositivo físico."
+            latex += r"\end{tcolorbox}"
+        else:
+            latex += r"\begin{tcolorbox}[colback=lightgray,colframe=gray,title=Conclusão Geral]"
+            latex += r"Nenhum match conclusivo foi identificado entre os arquivos investigados e os de referência. "
+            latex += r"Os scores PCE obtidos são insuficientes para afirmar que os arquivos compartilham a mesma fonte de captação."
+            latex += r"\end{tcolorbox}"
+        
+        latex = self._add_refs(latex, "PRNU")
+        
+        # --- Parâmetros ---
+        latex += r"\newpage"
+        latex += r"\section{Parâmetros de Configuração}"
+        latex += r"Para fins de auditabilidade e reprodutibilidade, seguem os parâmetros técnicos utilizados:"
+        latex += r"\begin{itemize}"
+        
+        prnu_limit = self.config.get('prnu_frame_limit', 30) if isinstance(self.config, dict) else 30
+        latex += f"\\item \\textbf{{Limite de Quadros PRNU:}} {prnu_limit}"
+        latex += r"\item \textbf{Limiar de Match (PCE):} 60.0"
+        latex += r"\end{itemize}"
+        
+        latex += r"\end{document}"
+        
+        # Escrever e compilar
+        tex_path = self.cm.report_dir / "prnu_comparison.tex"
+        with open(tex_path, 'w', encoding='utf-8') as f:
+            f.write(latex)
+        
+        self.logger.log("PRNU_COMPARISON_TEX_GENERATED", {"path": str(tex_path)})
+        
+        try:
+            self._compile_latex(tex_path, self.cm.report_dir)
+            pdf_path = self.cm.report_dir / "prnu_comparison.pdf"
+            self.logger.log("PRNU_COMPARISON_PDF_GENERATED", {"path": str(pdf_path)})
+        except Exception as e:
+            self.logger.log("PRNU_COMPARISON_COMP_ERROR", {"error": str(e)})
+            print(f"ERRO AO COMPILAR PDF: {e}")
+            print("O arquivo .tex foi gerado e pode ser compilado manualmente.")
+
     def _collect_data(self):
         base_data = {
             "case_name": self.cm.case_name,

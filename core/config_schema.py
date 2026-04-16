@@ -81,6 +81,12 @@ class AnalysisConfig:
     report_audio_silence: bool = True
     report_audio_deepfake: bool = True
     
+    # Cluster / Rede
+    retry_interval_seconds: int = 60    # Intervalo entre tentativas de reconexão (segundos)
+    retry_max_attempts: int = 10        # Máximo de tentativas antes de desistir
+    local_copy_enabled: bool = False    # Copiar arquivo para pasta local antes de processar
+    local_copy_dir: str = ""            # Pasta local para cópia temporária (vazio = pasta temp do sistema)
+    
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AnalysisConfig":
         """Cria configuração a partir de dicionário.

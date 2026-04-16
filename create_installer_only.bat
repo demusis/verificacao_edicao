@@ -8,8 +8,14 @@ goto NotFound
 
 :Found
 echo [INFO] Inno Setup encontrado em: "%ISCC_PATH%"
+echo [INFO] Detectando versao...
+python tools/get_version.py > temp_version.txt
+set /p APP_VERSION=<temp_version.txt
+del temp_version.txt
+echo [INFO] Versao detectada: %APP_VERSION%
+
 echo [INFO] Criando instalador...
-"%ISCC_PATH%" "setup_script.iss"
+"%ISCC_PATH%" /DMyAppVersion="%APP_VERSION%" "setup_script.iss"
 if errorlevel 1 (
      echo [ERRO] Falha ao executar o Inno Setup.
 ) else (

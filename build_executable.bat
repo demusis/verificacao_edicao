@@ -67,6 +67,16 @@ python -m PyInstaller --noconfirm --onedir --windowed --distpath "dist" ^
     --hidden-import "librosa.core" ^
     --hidden-import "soundfile" ^
     --hidden-import "audioread" ^
+    --hidden-import "soxr" ^
+    --hidden-import "numba" ^
+    --hidden-import "lazy_loader" ^
+    --hidden-import "pooch" ^
+    --hidden-import "joblib" ^
+    --hidden-import "decorator" ^
+    --hidden-import "psutil" ^
+    --hidden-import "reportlab" ^
+    --hidden-import "reportlab.pdfgen" ^
+    --hidden-import "reportlab.lib.pagesizes" ^
     --hidden-import "dataclasses" ^
     "app/gui.py"
 
@@ -94,12 +104,25 @@ python -m PyInstaller --noconfirm --onedir --console --distpath "dist" ^
     --hidden-import "librosa.core" ^
     --hidden-import "soundfile" ^
     --hidden-import "audioread" ^
+    --hidden-import "soxr" ^
+    --hidden-import "numba" ^
+    --hidden-import "lazy_loader" ^
+    --hidden-import "pooch" ^
+    --hidden-import "joblib" ^
+    --hidden-import "decorator" ^
+    --hidden-import "psutil" ^
+    --hidden-import "reportlab" ^
+    --hidden-import "reportlab.pdfgen" ^
+    --hidden-import "reportlab.lib.pagesizes" ^
     --hidden-import "dataclasses" ^
     "app/cli.py"
 
 echo.
 echo [3/3] Tentando criar Instalador (Inno Setup)...
 set "ISCC_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC_PATH%" set "ISCC_PATH=C:\Program Files\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC_PATH%" set "ISCC_PATH=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+
 if exist "%ISCC_PATH%" (
     echo Encontrado Inno Setup. Compilando...
     "%ISCC_PATH%" /DMyAppVersion="%APP_VERSION%" "setup_script.iss"
