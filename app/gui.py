@@ -868,16 +868,20 @@ class AnalysisWorker(QThread):
             batch_manifest.append(manifest_entry)
 
 class PrnuCompareWorker(QThread):
-    """Worker para comparar arquivos selecionados por PRNU com todos do diretório de trabalho."""
+    """Worker para comparar arquivos investigados por PRNU com arquivos de referência.
+    Todos os fingerprints são extraídos do zero."""
     progress = Signal(str)
     progress_val = Signal(int)
     progress_max = Signal(int)
     finished = Signal(bool, str)  # success, message
     
-    def __init__(self, external_files: list[Path], case_dir: Path, config=None):
+    def __init__(self, external_files: list[Path], reference_files: list[Path],
+                 output_dir: Path, case_name: str, config=None):
         super().__init__()
         self.external_files = external_files
-        self.case_dir = case_dir
+        self.reference_files = reference_files
+        self.output_dir = output_dir
+        self.case_name = case_name
         self.config = config
         self._is_cancelled = False
     
@@ -885,149 +889,88 @@ class PrnuCompareWorker(QThread):
         self._is_cancelled = True
         self.progress.emit("Cancelamento solicitado...")
     
-    def _collect_existing_fingerprints(self, results_dir: Path) -> list:
-        """Coleta todos os fingerprints PRNU existentes no diretório de resultados."""
-        fingerprints = []
-        
-        # Estratégia 1: Usar o manifesto
-        manifest_path = results_dir / "batch_manifest.json"
-        if manifest_path.exists():
-            try:
-                with open(manifest_path, 'r', encoding='utf-8') as f:
-                    manifest = json.load(f)
-                
-                for entry in manifest:
-                    fname = entry.get("filename", "")
-                    analysis_files = entry.get("analysis_files", {})
-                    
-                    # PRNU de vídeo (JSON separado)
-                    prnu_json_name = analysis_files.get("prnu_analysis")
-                    if prnu_json_name:
-                        prnu_json_path = results_dir / prnu_json_name
-                        if prnu_json_path.exists():
-                            try:
-                                with open(prnu_json_path, 'r', encoding='utf-8') as pf:
-                                    prnu_data = json.load(pf)
-                                if prnu_data.get("status") == "extracted" and "fingerprint_file" in prnu_data:
-                                    npy_path = results_dir / prnu_data["fingerprint_file"]
-                                    if npy_path.exists():
-                                        fingerprints.append({"name": fname, "path": npy_path})
-                            except Exception:
-                                pass
-                    
-                    # PRNU de imagem (embutido no JSON de análise de imagem)
-                    img_json_name = analysis_files.get("image_analysis")
-                    if img_json_name and not prnu_json_name:
-                        img_json_path = results_dir / img_json_name
-                        if img_json_path.exists():
-                            try:
-                                with open(img_json_path, 'r', encoding='utf-8') as pf:
-                                    img_data = json.load(pf)
-                                prnu_data = img_data.get("prnu_analysis", {})
-                                if prnu_data.get("status") == "extracted" and "fingerprint_file" in prnu_data:
-                                    npy_path = results_dir / prnu_data["fingerprint_file"]
-                                    if npy_path.exists():
-                                        fingerprints.append({"name": fname, "path": npy_path})
-                            except Exception:
-                                pass
-            except Exception as e:
-                self.progress.emit(f"⚠️ Erro ao ler manifesto: {e}")
-        
-        # Estratégia 2: Fallback - buscar .npy diretamente
-        if not fingerprints:
-            self.progress.emit("📂 Manifesto insuficiente. Buscando arquivos .npy diretamente...")
-            for npy_file in sorted(results_dir.glob("*_prnu.npy")):
-                # Ignorar arquivos de comparação temporários
-                if npy_file.name.startswith("_compare_"):
-                    continue
-                stem = npy_file.stem  # e.g., "01_video_prnu"
-                name_part = stem.rsplit("_prnu", 1)[0]
-                if name_part and name_part[0].isdigit() and "_" in name_part:
-                    name_part = name_part.split("_", 1)[1]
-                fingerprints.append({"name": name_part, "path": npy_file})
-        
-        return fingerprints
+    def _extract_prnu(self, file_path: Path, cm, label: str, idx: int, total: int):
+        """Extrai o fingerprint PRNU de um único arquivo."""
+        self.progress.emit(f"\n[{idx}/{total}] Extraindo PRNU ({label}): {file_path.name}")
+        try:
+            prnu_mod = PrnuAnalysisModule(cm)
+            prnu_mod.frame_limit = getattr(self.config, 'prnu_frame_limit', 30)
+            
+            out_filename = f"_prnu_{label}_{file_path.stem}_prnu.json"
+            prnu_res = prnu_mod.run(file_path, output_filename=out_filename)
+            
+            if prnu_res.get("status") == "extracted":
+                npy_path = cm.results_dir / prnu_res["fingerprint_file"]
+                self.progress.emit(f"  ✅ Fingerprint extraído com sucesso.")
+                return {"name": file_path.name, "path": npy_path}
+            else:
+                self.progress.emit(f"  ⚠️ Falha: {prnu_res.get('error', 'desconhecido')}")
+                return None
+        except Exception as e:
+            self.progress.emit(f"  ❌ Erro: {e}")
+            return None
     
     def run(self):
         try:
-            results_dir = self.case_dir / "results"
-            report_dir = self.case_dir / "report"
+            from core.utils import get_timestamp_iso
+            timestamp = get_timestamp_iso()
             
-            if not results_dir.exists():
-                self.finished.emit(False, f"Diretório 'results/' não encontrado em:\n{self.case_dir}")
-                return
-            
-            report_dir.mkdir(parents=True, exist_ok=True)
-            
-            # 1. Coletar fingerprints existentes
-            self.progress.emit("🔍 Coletando fingerprints PRNU existentes no diretório de trabalho...")
-            existing_fps = self._collect_existing_fingerprints(results_dir)
-            
-            if not existing_fps:
-                self.finished.emit(False,
-                    "Nenhum fingerprint PRNU encontrado no diretório de trabalho.\n"
-                    "Execute a análise completa primeiro para gerar os fingerprints.")
-                return
-            
-            self.progress.emit(f"📋 {len(existing_fps)} fingerprint(s) de referência encontrado(s):")
-            for fp in existing_fps:
-                self.progress.emit(f"  • {fp['name']}")
-            
-            # 2. Extrair PRNU dos arquivos externos
-            self.progress.emit("\n🔬 Extraindo PRNU dos arquivos selecionados...")
-            external_fps = []
-            
-            total_steps = len(self.external_files) + 1  # +1 para fase de comparação
-            self.progress_max.emit(total_steps)
-            
-            # Usar CaseManager existente
-            cm = CaseManager(self.case_dir.name, base_dir=self.case_dir.parent)
+            # Criar CaseManager para este job
+            cm = CaseManager(self.case_name, base_dir=self.output_dir)
             cm.setup()
             
+            total_files = len(self.reference_files) + len(self.external_files)
+            self.progress_max.emit(total_files + 1)  # +1 para fase de comparação
+            
+            # 1. Extrair PRNU de TODOS os arquivos (referência + investigados)
+            self.progress.emit(f"🔬 Extraindo PRNU de {total_files} arquivos (tudo do zero)...")
+            
+            reference_fps = []
+            step = 0
+            for idx, ref_file in enumerate(self.reference_files):
+                if self._is_cancelled:
+                    self.finished.emit(False, "Cancelado")
+                    return
+                step += 1
+                self.progress_val.emit(step)
+                fp = self._extract_prnu(ref_file, cm, "ref", step, total_files)
+                if fp:
+                    reference_fps.append(fp)
+            
+            external_fps = []
             for idx, ext_file in enumerate(self.external_files):
                 if self._is_cancelled:
                     self.finished.emit(False, "Cancelado")
                     return
-                
-                self.progress_val.emit(idx)
-                self.progress.emit(f"\n[{idx+1}/{len(self.external_files)}] Extraindo PRNU: {ext_file.name}")
-                
-                try:
-                    prnu_mod = PrnuAnalysisModule(cm)
-                    prnu_mod.frame_limit = getattr(self.config, 'prnu_frame_limit', 30)
-                    
-                    out_filename = f"_compare_{ext_file.stem}_prnu.json"
-                    prnu_res = prnu_mod.run(ext_file, output_filename=out_filename)
-                    
-                    if prnu_res.get("status") == "extracted":
-                        npy_path = cm.results_dir / prnu_res["fingerprint_file"]
-                        external_fps.append({"name": ext_file.name, "path": npy_path})
-                        self.progress.emit(f"  ✅ Fingerprint extraído com sucesso.")
-                    else:
-                        self.progress.emit(f"  ⚠️ Falha na extração: {prnu_res.get('error', 'desconhecido')}")
-                except Exception as e:
-                    self.progress.emit(f"  ❌ Erro: {e}")
+                step += 1
+                self.progress_val.emit(step)
+                fp = self._extract_prnu(ext_file, cm, "inv", step, total_files)
+                if fp:
+                    external_fps.append(fp)
             
+            if not reference_fps:
+                self.finished.emit(False, "Nenhum fingerprint de referência pôde ser extraído.")
+                return
             if not external_fps:
-                self.finished.emit(False, "Nenhum fingerprint pôde ser extraído dos arquivos selecionados.")
+                self.finished.emit(False, "Nenhum fingerprint dos arquivos investigados pôde ser extraído.")
                 return
             
-            # 3. Comparar cada externo com todos os existentes
-            self.progress.emit(f"\n📊 Comparando {len(external_fps)} arquivo(s) externo(s) com {len(existing_fps)} arquivo(s) de referência...")
-            self.progress_val.emit(len(self.external_files))
+            # 2. Comparar cada investigado com todos os de referência
+            self.progress.emit(f"\n📊 Comparando {len(external_fps)} investigado(s) com {len(reference_fps)} referência(s)...")
+            self.progress_val.emit(total_files)
             
             comparison_results = []
             
             for ext_fp in external_fps:
                 file_comparisons = []
-                for exist_fp in existing_fps:
+                for ref_fp in reference_fps:
                     if self._is_cancelled:
                         self.finished.emit(False, "Cancelado")
                         return
                     try:
-                        result = PrnuAnalysisModule.compare_fingerprints(ext_fp["path"], exist_fp["path"])
+                        result = PrnuAnalysisModule.compare_fingerprints(ext_fp["path"], ref_fp["path"])
                         file_comparisons.append({
-                            "existing_file": exist_fp["name"],
+                            "existing_file": ref_fp["name"],
                             "pce": result.get("pce", 0),
                             "peak": result.get("peak", 0),
                             "energy": result.get("energy", 0),
@@ -1038,11 +981,11 @@ class PrnuCompareWorker(QThread):
                         
                         match_str = "✅ MATCH" if result.get("match") else "—"
                         pce_val = result.get("pce", 0)
-                        self.progress.emit(f"  {ext_fp['name']} vs {exist_fp['name']}: PCE={pce_val:.1f} {match_str}")
+                        self.progress.emit(f"  {ext_fp['name']} vs {ref_fp['name']}: PCE={pce_val:.1f} {match_str}")
                     except Exception as e:
-                        self.progress.emit(f"  ⚠️ Erro: {ext_fp['name']} vs {exist_fp['name']}: {e}")
+                        self.progress.emit(f"  ⚠️ Erro: {ext_fp['name']} vs {ref_fp['name']}: {e}")
                         file_comparisons.append({
-                            "existing_file": exist_fp["name"],
+                            "existing_file": ref_fp["name"],
                             "pce": 0, "match": False, "error": str(e)
                         })
                 
@@ -1051,37 +994,34 @@ class PrnuCompareWorker(QThread):
                     "comparisons": file_comparisons
                 })
             
-            # 4. Salvar JSON
-            from core.utils import get_timestamp_iso
-            timestamp = get_timestamp_iso()
-            
+            # 3. Salvar JSON
             comparison_data = {
                 "type": "prnu_comparison",
                 "timestamp": timestamp,
-                "case_name": self.case_dir.name,
+                "case_name": self.case_name,
                 "external_files": [fp["name"] for fp in external_fps],
-                "existing_files": [fp["name"] for fp in existing_fps],
+                "existing_files": [fp["name"] for fp in reference_fps],
                 "results": comparison_results
             }
             
-            json_path = results_dir / "prnu_comparison.json"
+            json_path = cm.results_dir / "prnu_comparison.json"
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(comparison_data, f, indent=4, ensure_ascii=False)
             
             self.progress.emit(f"\n💾 Resultados salvos em: {json_path}")
             
-            # 5. Gerar PDF
+            # 4. Gerar PDF
             self.progress.emit("\n📝 Gerando relatório PDF...")
             try:
                 ReportingModule(cm, config=self.config).generate_prnu_comparison(comparison_data)
-                self.progress.emit(f"✅ Relatório PDF gerado em: {report_dir}")
+                self.progress.emit(f"✅ Relatório PDF gerado em: {cm.report_dir}")
             except Exception as rep_err:
                 self.progress.emit(f"❌ Erro ao gerar PDF: {rep_err}")
                 import traceback
                 traceback.print_exc()
             
-            self.progress_val.emit(total_steps)
-            self.finished.emit(True, str(report_dir))
+            self.progress_val.emit(total_files + 1)
+            self.finished.emit(True, str(cm.report_dir))
             
         except Exception as e:
             self.progress.emit(f"ERRO: {e}")
@@ -1249,27 +1189,18 @@ class MainWindow(QMainWindow):
         dlg.show()
 
     def start_prnu_compare(self):
-        """Abre diálogo para comparar arquivos por PRNU com os do diretório de trabalho."""
-        # 1. Selecionar diretório de trabalho (caso existente)
-        case_dir = QFileDialog.getExistingDirectory(
-            self, "Selecionar Diretório do Caso (com resultados PRNU)"
-        )
-        if not case_dir:
-            return
-        
-        case_path = Path(case_dir)
-        results_path = case_path / "results"
-        
-        if not results_path.exists():
-            QMessageBox.critical(
-                self, "Erro",
-                f"O diretório selecionado não contém uma pasta 'results/'.\n\n"
-                f"Selecione a pasta raiz de um caso processado anteriormente.\n"
-                f"Exemplo: .../case_BATCH_10_FILES_video1/"
+        """Compara arquivos investigados por PRNU com os já selecionados (referência)."""
+        # 1. Verificar se há arquivos de referência selecionados
+        if not self.selected_files:
+            QMessageBox.warning(
+                self, "Aviso",
+                "Nenhum arquivo de referência selecionado.\n\n"
+                "Primeiro selecione os arquivos de referência usando "
+                "'Selecionar Arquivos' ou 'Selecionar Pasta'."
             )
             return
         
-        # 2. Selecionar arquivos para comparar
+        # 2. Selecionar arquivos para investigar (comparar)
         filters = (
             "Forensic Files (*.mp4 *.mkv *.avi *.mov *.webm *.flv *.dav "
             "*.jpg *.jpeg *.png *.tif *.tiff *.webp);;"
@@ -1277,25 +1208,51 @@ class MainWindow(QMainWindow):
             "Images (*.jpg *.jpeg *.png *.tif *.tiff *.webp)"
         )
         fnames, _ = QFileDialog.getOpenFileNames(
-            self, "Selecionar Arquivos para Comparar por PRNU", "", filters
+            self, "Selecionar Arquivos para Investigar por PRNU", "", filters
         )
         if not fnames:
             return
         
         external_files = [Path(f) for f in fnames]
         
-        # 3. Confirmar
+        # 3. Selecionar diretório de saída (mesmo padrão da análise normal)
+        output_dir = QFileDialog.getExistingDirectory(
+            self, "Selecionar Pasta para Salvar Resultados da Comparação PRNU"
+        )
+        if not output_dir:
+            return
+        
+        # 4. Nome do caso
+        from PySide6.QtWidgets import QInputDialog
+        default_name = f"PRNU_COMPARE_{len(external_files)}_vs_{len(self.selected_files)}"
+        case_name, ok = QInputDialog.getText(
+            self, "Nome do Caso PRNU",
+            "Digite o nome da pasta a ser criada:",
+            text=default_name
+        )
+        if not ok or not case_name.strip():
+            return
+        
+        # 5. Confirmar
+        ref_names = "\n".join(f"  • {f.name}" for f in self.selected_files[:5])
+        if len(self.selected_files) > 5:
+            ref_names += f"\n  ... e mais {len(self.selected_files) - 5} arquivo(s)"
+        ext_names = "\n".join(f"  • {f.name}" for f in external_files[:5])
+        if len(external_files) > 5:
+            ext_names += f"\n  ... e mais {len(external_files) - 5} arquivo(s)"
+        
         reply = QMessageBox.question(
             self, "Confirmar Comparação PRNU",
-            f"Comparar {len(external_files)} arquivo(s) selecionado(s) por PRNU\n"
-            f"com todos os fingerprints do caso em:\n{case_dir}\n\n"
+            f"REFERÊNCIA ({len(self.selected_files)} arquivo(s)):\n{ref_names}\n\n"
+            f"INVESTIGADOS ({len(external_files)} arquivo(s)):\n{ext_names}\n\n"
+            f"Todos os PRNUs serão calculados do zero.\n"
             f"O relatório PDF será gerado automaticamente.\n\nContinuar?",
             QMessageBox.Yes | QMessageBox.No
         )
         if reply != QMessageBox.Yes:
             return
         
-        # 4. Iniciar worker
+        # 6. Iniciar worker
         self.run_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.browse_btn.setEnabled(False)
@@ -1306,17 +1263,26 @@ class MainWindow(QMainWindow):
         self.log_output.clear()
         
         config = load_config()
+        reference_files = [Path(f) for f in self.selected_files]
         
-        self.worker = PrnuCompareWorker(external_files, case_path, config=config)
+        self.worker = PrnuCompareWorker(
+            external_files=external_files,
+            reference_files=reference_files,
+            output_dir=Path(output_dir),
+            case_name=case_name.strip(),
+            config=config
+        )
         self.worker.progress.connect(self.update_log)
         self.worker.progress_max.connect(self.progress_bar.setMaximum)
         self.worker.progress_val.connect(self.progress_bar.setValue)
         self.worker.finished.connect(self.analysis_finished)
         self.worker.start()
         
-        self.log_output.append(f"🔍 Comparação PRNU iniciada.")
-        self.log_output.append(f"📂 Caso: {case_dir}")
-        self.log_output.append(f"📁 Arquivos externos: {len(external_files)}")
+        self.log_output.append("🔍 Comparação PRNU iniciada.")
+        self.log_output.append(f"📂 Referência: {len(reference_files)} arquivo(s)")
+        for rf in reference_files:
+            self.log_output.append(f"  • {rf.name}")
+        self.log_output.append(f"📁 Investigados: {len(external_files)} arquivo(s)")
         for ef in external_files:
             self.log_output.append(f"  • {ef.name}")
         self.log_output.append("")
