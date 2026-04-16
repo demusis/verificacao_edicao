@@ -127,7 +127,6 @@ class ReportingModule:
 \usepackage{xcolor}
 \usepackage{booktabs}
 \usepackage{longtable}
-\usepackage{enumitem}
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{tcolorbox}
@@ -206,17 +205,17 @@ class ReportingModule:
         latex += r"\section{Identificação dos Arquivos}"
         
         latex += r"\subsection*{Arquivos Investigados (Externos)}"
-        latex += r"\begin{tabular}{l p{12cm}}"
+        latex += r"\begin{center}\begin{tabular}{l p{12cm}}"
         latex += r"\toprule \textbf{ID} & \textbf{Arquivo} \\ \midrule "
         for i, fname in enumerate(external_files):
             fname_clean = r"\blackurl{" + str(fname) + r"}"
             latex += f"E{i+1} & {fname_clean} \\\\ \n"
-        latex += r"\bottomrule \end{tabular}"
+        latex += r"\bottomrule \end{tabular}\end{center}"
         
         latex += r"\vspace{0.5cm}"
         
         latex += r"\subsection*{Arquivos de Referência (Diretório de Trabalho)}"
-        latex += r"\begin{longtable}{l p{12cm}}"
+        latex += r"\begin{longtable}[c]{l p{12cm}}"
         latex += r"\toprule \textbf{ID} & \textbf{Arquivo} \\ \midrule "
         latex += r"\endhead "
         for i, fname in enumerate(existing_files):
@@ -229,7 +228,7 @@ class ReportingModule:
         
         # Tabela resumo
         latex += r"\subsection{Tabela Geral de Comparações (PCE)}"
-        latex += r"\begin{longtable}{c c c l}"
+        latex += r"\begin{longtable}[c]{c c c l}"
         latex += r"\toprule \textbf{Investigado} & \textbf{Referência} & \textbf{Score PCE} & \textbf{Resultado} \\ \midrule "
         latex += r"\endhead "
         
@@ -280,7 +279,7 @@ class ReportingModule:
         for res_entry in results:
             ext_name = res_entry.get("external_file", "?")
             
-            latex += f"\\subsubsection{{\\blackurl{{{ext_name}}}}}"
+            latex += f"\\subsubsection{{\\texttt{{{self._escape_latex(ext_name)}}}}}"
             
             comparisons = res_entry.get("comparisons", [])
             
@@ -310,7 +309,7 @@ class ReportingModule:
                     latex += r"\end{tcolorbox}"
             
             # Tabela ranking
-            latex += r"\begin{longtable}{c l c l}"
+            latex += r"\begin{longtable}[c]{c l c l}"
             latex += r"\toprule \textbf{Rank} & \textbf{Arquivo de Referência} & \textbf{PCE} & \textbf{Status} \\ \midrule "
             latex += r"\endhead "
             
@@ -364,6 +363,16 @@ class ReportingModule:
         latex += r"\end{itemize}"
         
         latex += r"\end{document}"
+        
+        # Normalizar quebras de linha para compilação LaTeX correta
+        # (previne erros do enumitem/babel quando comandos ficam concatenados)
+        for _cmd in [r'\begin{', r'\end{', r'\section', r'\subsection',
+                     r'\subsubsection', r'\item ', r'\newpage', r'\noindent']:
+            latex = latex.replace(_cmd, '\n' + _cmd)
+        latex = re.sub(r'\n{3,}', '\n\n', latex)
+        
+        # Remover opções do enumitem (incompatível com algumas instalações MiKTeX)
+        latex = re.sub(r'\\begin\{itemize\}\[[^\]]*\]', r'\\begin{itemize}', latex)
         
         # Escrever e compilar
         tex_path = self.cm.report_dir / "prnu_comparison.tex"
@@ -559,11 +568,29 @@ class ReportingModule:
             tex_file.name
         ]
         
+        # Limpar auxiliares de compilações anteriores (previne erros de .aux corrompido)
+        for ext in ['.aux', '.toc', '.out']:
+            aux_path = output_dir / (tex_file.stem + ext)
+            if aux_path.exists():
+                try:
+                    aux_path.unlink()
+                except Exception:
+                    pass
+        
         for i in range(3):
             # cwd=str(output_dir) é crucial
             res = subprocess.run(cmd, cwd=str(output_dir), capture_output=True, text=True, encoding='utf-8', errors='ignore')
             if res.returncode != 0:
-                if i == 0: continue 
+                if i == 0:
+                    # Limpar auxiliares corrompidos pelo pass falho antes de tentar novamente
+                    for ext in ['.aux', '.toc', '.out']:
+                        aux_path = output_dir / (tex_file.stem + ext)
+                        if aux_path.exists():
+                            try:
+                                aux_path.unlink()
+                            except Exception:
+                                pass
+                    continue
                 raise RuntimeError(f"pdflatex failed (Pass {i+1}): {res.stderr or res.stdout}")
 
     def _generate_latex_source(self, data):

@@ -1014,7 +1014,13 @@ class PrnuCompareWorker(QThread):
             self.progress.emit("\n📝 Gerando relatório PDF...")
             try:
                 ReportingModule(cm, config=self.config).generate_prnu_comparison(comparison_data)
-                self.progress.emit(f"✅ Relatório PDF gerado em: {cm.report_dir}")
+                pdf_path = cm.report_dir / "prnu_comparison.pdf"
+                if pdf_path.exists():
+                    self.progress.emit(f"✅ Relatório PDF gerado em: {cm.report_dir}")
+                else:
+                    self.progress.emit(f"⚠️ Arquivo .tex gerado, mas a compilação do PDF falhou.")
+                    self.progress.emit(f"   Verifique se o pdflatex está instalado e no PATH.")
+                    self.progress.emit(f"   O .tex pode ser compilado manualmente em: {cm.report_dir}")
             except Exception as rep_err:
                 self.progress.emit(f"❌ Erro ao gerar PDF: {rep_err}")
                 import traceback
