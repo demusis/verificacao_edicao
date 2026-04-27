@@ -6,6 +6,10 @@ echo ========================================================
 :: Limpar pastas antigas se existirem
 if exist build rd /s /q build 2>nul
 if exist dist rd /s /q dist 2>nul
+set "TEMP_BUILD=%TEMP%\forensic_build"
+if exist "%TEMP_BUILD%" rd /s /q "%TEMP_BUILD%" 2>nul
+mkdir "%TEMP_BUILD%\dist"
+mkdir "%TEMP_BUILD%\build"
 
 :: Limpar arquivos SPEC antigos
 del *.spec 2>nul
@@ -43,7 +47,7 @@ for /f "delims=" %%i in ('python -c "import cv2; print(cv2.data.haarcascades)"')
 echo Caminho dos haarcascades do OpenCV: %OPENCV_HAARCASCADES_PATH%
 
 echo [1/2] Criando Executável da GUI (Interface Gráfica)...
-python -m PyInstaller --noconfirm --onedir --windowed --distpath "dist" ^
+python -m PyInstaller --noconfirm --onefile --windowed --distpath "%TEMP_BUILD%\dist" --workpath "%TEMP_BUILD%\build" ^
     --icon "icon.ico" ^
     --name "VerificacaoEdicao" ^
     --add-data "core;core" ^
@@ -62,6 +66,7 @@ python -m PyInstaller --noconfirm --onedir --windowed --distpath "dist" ^
     --hidden-import "skimage.feature" ^
     --hidden-import "skimage.feature._local_binary_pattern" ^
     --hidden-import "pywt" ^
+    --collect-all "pywt" ^
     --hidden-import "librosa" ^
     --hidden-import "librosa.feature" ^
     --hidden-import "librosa.core" ^
@@ -82,7 +87,7 @@ python -m PyInstaller --noconfirm --onedir --windowed --distpath "dist" ^
 
 echo.
 echo [2/2] Criando Executável da CLI (Linha de Comando)...
-python -m PyInstaller --noconfirm --onedir --console --distpath "dist" ^
+python -m PyInstaller --noconfirm --onefile --console --distpath "%TEMP_BUILD%\dist" --workpath "%TEMP_BUILD%\build" ^
     --icon "icon.ico" ^
     --name "VerificacaoEdicao_CLI" ^
     --add-data "core;core" ^
@@ -99,6 +104,7 @@ python -m PyInstaller --noconfirm --onedir --console --distpath "dist" ^
     --hidden-import "skimage.feature" ^
     --hidden-import "skimage.feature._local_binary_pattern" ^
     --hidden-import "pywt" ^
+    --collect-all "pywt" ^
     --hidden-import "librosa" ^
     --hidden-import "librosa.feature" ^
     --hidden-import "librosa.core" ^
@@ -118,6 +124,11 @@ python -m PyInstaller --noconfirm --onedir --console --distpath "dist" ^
     "app/cli.py"
 
 echo.
+echo [Extra] Copiando arquivos gerados para a pasta dist local...
+mkdir dist 2>nul
+copy /y "%TEMP_BUILD%\dist\*.exe" "dist\"
+
+echo.
 echo [3/3] Tentando criar Instalador (Inno Setup)...
 set "ISCC_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC_PATH%" set "ISCC_PATH=C:\Program Files\Inno Setup 6\ISCC.exe"
@@ -125,7 +136,7 @@ if not exist "%ISCC_PATH%" set "ISCC_PATH=%LOCALAPPDATA%\Programs\Inno Setup 6\I
 
 if exist "%ISCC_PATH%" (
     echo Encontrado Inno Setup. Compilando...
-    "%ISCC_PATH%" /DMyAppVersion="%APP_VERSION%" "setup_script.iss"
+    "%ISCC_PATH%" /DMyAppVersion="%APP_VERSION%" /DBuildDir="%TEMP_BUILD%\dist" "setup_script.iss"
     echo.
     echo Instalador criado em dist-setup/
 ) else (
@@ -136,7 +147,7 @@ if exist "%ISCC_PATH%" (
 
 echo.
 echo ========================================================
-if exist "dist\VerificacaoEdicao\VerificacaoEdicao.exe" (
+if exist "dist\VerificacaoEdicao.exe" (
     echo PROCESSO CONCLUIDO COM SUCESSO!
     echo Executaveis na pasta 'dist/'
     if exist "dist-setup\VerificacaoEdicao_Setup.exe" (

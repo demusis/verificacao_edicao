@@ -59,6 +59,8 @@ class AnalysisConfig:
     report_deepfake: bool = True
     report_individual: bool = False
     resume_processing: bool = True
+    report_metadata: bool = True
+    report_continuity: bool = True
     
     # Image Report
     report_ela: bool = True

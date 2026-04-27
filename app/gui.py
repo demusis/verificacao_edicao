@@ -93,6 +93,10 @@ class AnalysisWorker(QThread):
                  "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(file_path)],
                 capture_output=True, text=True, timeout=10
             )
+            if result.returncode != 0:
+                # Se ffprobe der erro (ex: nome de arquivo com caracteres estranhos),
+                # assume fallback para True (é um vídeo baseado na extensão)
+                return True
             return "video" in result.stdout.lower()
         except Exception:
             # Em caso de erro, assume que tem vídeo se a extensão indicar
@@ -176,6 +180,8 @@ class AnalysisWorker(QThread):
                 case_name = f"case_{self.input_files[0].stem}"
             else:
                 case_name = f"case_BATCH_{len(self.input_files)}_FILES_{self.input_files[0].stem}"
+            # Sanitizar: Windows não aceita nomes de diretório com espaço/ponto no final
+            case_name = case_name.strip().rstrip('. ')
                 
             self.progress.emit(f"Iniciando caso: {case_name}")
             self.progress_max.emit(len(self.input_files))
@@ -1238,6 +1244,7 @@ class MainWindow(QMainWindow):
         )
         if not ok or not case_name.strip():
             return
+        case_name = case_name.strip().rstrip('. ')
         
         # 5. Confirmar
         ref_names = "\n".join(f"  • {f.name}" for f in self.selected_files[:5])
@@ -1302,6 +1309,26 @@ class MainWindow(QMainWindow):
         output_dir = QFileDialog.getExistingDirectory(self, "Selecionar Pasta para Salvar Relatórios")
         if not output_dir:
             return  # Usuário cancelou
+        
+        # Verificar se o diretório de saída é acessível e tem permissão de escrita
+        output_path = Path(output_dir)
+        try:
+            # Teste de escrita real: cria e remove um arquivo temporário
+            test_file = output_path / ".forensic_write_test"
+            test_file.write_text("test", encoding="utf-8")
+            test_file.unlink()
+        except OSError as e:
+            QMessageBox.critical(
+                self, "Erro de Acesso",
+                f"Não foi possível escrever no diretório selecionado:\n\n"
+                f"{output_dir}\n\n"
+                f"Erro: {e}\n\n"
+                f"Verifique se:\n"
+                f"• O caminho ainda existe (Google Drive sincronizado?)\n"
+                f"• Você tem permissão de escrita nesse local\n"
+                f"• O disco não está cheio"
+            )
+            return
             
         # Sugerir nome padrão
         if len(self.selected_files) == 1:
@@ -1316,6 +1343,8 @@ class MainWindow(QMainWindow):
                                            text=default_name)
         if not ok or not case_name.strip():
             return # Cancelou ou vazio
+        # Sanitizar: remover espaços nas extremidades e caracteres inválidos para Windows
+        case_name = case_name.strip().rstrip('. ')
             
         self.run_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)

@@ -7,8 +7,8 @@ class CaseManager:
     """Gerenciador de estrutura de diretórios e logs por caso."""
     
     def __init__(self, case_name: str, base_dir: Path = CASES_DIR):
-        self.case_name = case_name
-        self.case_dir = Path(base_dir) / case_name
+        self.case_name = case_name.strip().rstrip('. ')
+        self.case_dir = Path(base_dir) / self.case_name
         
         # Subdiretórios
         self.results_dir = self.case_dir / "results"
@@ -22,8 +22,8 @@ class CaseManager:
     def setup(self) -> Logger:
         """Cria estrutura de pastas e inicializa o logger."""
         self.case_dir.mkdir(parents=True, exist_ok=True)
-        self.results_dir.mkdir(exist_ok=True)
-        self.report_dir.mkdir(exist_ok=True)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        self.report_dir.mkdir(parents=True, exist_ok=True)
         
         self.logger = Logger(self.log_path)
         

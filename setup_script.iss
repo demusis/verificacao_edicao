@@ -46,10 +46,9 @@ Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortugue
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; O executável principal
-Source: "dist\VerificacaoEdicao\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-; Todos os outros arquivos e pastas gerados pelo PyInstaller
-Source: "dist\VerificacaoEdicao\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; O executável principal e CLI
+Source: "{#BuildDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildDir}\VerificacaoEdicao_CLI.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

@@ -20,7 +20,8 @@ from core.config_schema import AnalysisConfig, DEFAULT_CONFIG
 
 _logger = logging.getLogger(__name__)
 
-CONFIG_FILE = Path("config.json")
+from core.config import APP_DIR
+CONFIG_FILE = APP_DIR / "config.json"
 
 
 def load_config() -> AnalysisConfig:
@@ -240,6 +241,14 @@ class SettingsDialog(QDialog):
         self.chk_rep_struct = QCheckBox("Estrutura do Arquivo (Vídeo)")
         self.chk_rep_struct.setChecked(self.config.report_structure)
         form_rep.addRow(self.chk_rep_struct)
+        
+        self.chk_rep_meta = QCheckBox("Metadados do Arquivo (Vídeo/Imagem)")
+        self.chk_rep_meta.setChecked(self.config.report_metadata)
+        form_rep.addRow(self.chk_rep_meta)
+        
+        self.chk_rep_cont = QCheckBox("Análise de Continuidade Visual (Vídeo)")
+        self.chk_rep_cont.setChecked(self.config.report_continuity)
+        form_rep.addRow(self.chk_rep_cont)
         
         self.chk_rep_gop = QCheckBox("Estrutura de Compressão GOP (Vídeo)")
         self.chk_rep_gop.setChecked(self.config.report_gop)
@@ -532,6 +541,8 @@ class SettingsDialog(QDialog):
             deepfake_fast_mode=self.chk_df_fast.isChecked(),
             # Report
             report_structure=self.chk_rep_struct.isChecked(),
+            report_metadata=self.chk_rep_meta.isChecked(),
+            report_continuity=self.chk_rep_cont.isChecked(),
             report_gop=self.chk_rep_gop.isChecked(),
             report_benford=self.chk_rep_benford.isChecked(),
             report_quantization=self.chk_rep_quant.isChecked(),
