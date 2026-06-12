@@ -157,3 +157,18 @@ cases/
 *.log
 config.json
 desktop.ini
+
+# Binários e artefatos de build (não versionar executáveis)
+*.exe
+*.whl
+vendor/
+build_log.txt
+build_error.log
+build_test/
+dist_new/
+dist-setup/
+
+# Saídas de depuração e testes manuais
+debug_results/
+test_output/
+arquivos_teste/

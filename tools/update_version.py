@@ -1,6 +1,6 @@
 import re
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 VERSION_FILE = Path("app/version.py")
 
