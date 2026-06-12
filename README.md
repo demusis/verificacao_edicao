@@ -94,8 +94,8 @@ Os resultados são organizados na pasta `cases/`:
 ```
 cases/
 └── case_[NOME]/
-    ├── audit/
-    │   └── audit.jsonl       # Log imutável (hash chain)
+    ├── execution.log         # Log de auditoria JSONL (hash chain SHA-256)
+    ├── evidence_manifest.json
     ├── results/              # JSONs detalhados por módulo
     │   ├── *_file_analysis.json
     │   ├── *_audio_analysis.json
@@ -106,6 +106,36 @@ cases/
         ├── report.pdf        # Laudo Técnico Final
         └── report.tex        # Fonte LaTeX
 ```
+
+### Verificação de integridade do log de auditoria
+
+Cada evento do `execution.log` é encadeado criptograficamente ao anterior
+(SHA-256). Para verificar se a trilha de auditoria não foi adulterada:
+
+```bash
+python tools/verify_audit_log.py cases/case_[NOME]/execution.log
+```
+
+O comando retorna código de saída `0` se a cadeia estiver íntegra e lista os
+eventos violados caso contrário.
+
+---
+
+## 🧪 Desenvolvimento e Testes
+
+A suíte de testes automatizados (pytest) cobre a infraestrutura central e a
+lógica pura dos módulos de análise, sem depender de FFmpeg ou mídia real:
+
+```bash
+pip install pytest pytest-cov
+python -m pytest            # suíte completa
+python -m pytest --cov      # com cobertura
+```
+
+Documentação para desenvolvedores:
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — arquitetura, camadas e fluxo de execução.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — ambiente, padrões de código e fluxo de contribuição.
+- [scripts/README.md](scripts/README.md) — scripts auxiliares de depuração e QA manual.
 
 ---
 
