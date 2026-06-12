@@ -1,12 +1,15 @@
-import cv2
-import numpy as np
 import json
 import os
 from pathlib import Path
-from core.case_manager import CaseManager
+
+import cv2
+import numpy as np
+
 from adapters.ffmpeg_adapter import FFmpegAdapter
+from core.case_manager import CaseManager
 from core.hashing import calculate_file_hash
 from modules.prnu_analysis import PrnuAnalysisModule
+
 
 class ImageForensicsModule:
     """
@@ -14,7 +17,7 @@ class ImageForensicsModule:
     Inclui: Metadados (EXIF/Hash), ELA (Error Level Analysis) e Ruído.
     """
     
-    def __init__(self, case_manager: CaseManager, config: dict = None):
+    def __init__(self, case_manager: CaseManager, config: dict | None = None):
         self.cm = case_manager
         # Prioridade: Config injetada > Dict vazio
         # Converter objeto AnalysisConfig para dict se necessário
@@ -32,7 +35,8 @@ class ImageForensicsModule:
         self.logger.log("IMG_ANALYSIS_START", {"file": input_file.name})
         
         def notify(msg):
-            if progress_callback: progress_callback(msg)
+            if progress_callback:
+                progress_callback(msg)
 
         try:
             # 1. Integridade (Hash)
@@ -162,8 +166,7 @@ class ImageForensicsModule:
             minima = []
             # Smooth curve slightly?
             # Find valleys
-            predicted_q = 0
-            
+
             # Derivada simples
             # valley se errors[i-1] > errors[i] < errors[i+1]
             for i in range(1, len(errors)-1):
@@ -182,8 +185,7 @@ class ImageForensicsModule:
                 # Um mínimo detectado em Q63 indica que a imagem possui assinaturas 
                 # de quantização de um salvamento anterior nesta qualidade específica.
                 
-                current_q_est = max(minima)
-                valid_minima = [m for m in minima if m < 95] 
+                valid_minima = [m for m in minima if m < 95]
                 
                 if len(valid_minima) > 1:
                     is_double = True
@@ -206,7 +208,8 @@ class ImageForensicsModule:
             temp_path_full = str(self.cm.results_dir / f"temp_ghost_full_{input_file.stem}.jpg")
             cv2.imwrite(temp_path_full, img, [cv2.IMWRITE_JPEG_QUALITY, target_q])
             recomp_full = cv2.imread(temp_path_full)
-            if os.path.exists(temp_path_full): os.remove(temp_path_full)
+            if os.path.exists(temp_path_full):
+                os.remove(temp_path_full)
             
             # Verificar se leitura foi bem sucedida
             if recomp_full is None or recomp_full.shape != img.shape:
@@ -279,7 +282,8 @@ class ImageForensicsModule:
                     x_end = min(x + block_size, w)
                     
                     # Se bloco for muito pequeno, ignora
-                    if (x_end-x) < 32 or (y_end-y) < 32: continue
+                    if (x_end-x) < 32 or (y_end-y) < 32:
+                        continue
                     
                     block = residual[y:y_end, x:x_end]
                     
@@ -298,11 +302,9 @@ class ImageForensicsModule:
                     mean_mag = np.mean(magnitude)
                     max_mag = np.max(magnitude)
                     
-                    if mean_mag == 0: 
-                        score = 0
-                    else:
-                        score = max_mag / mean_mag
-                        
+                    score = 0 if mean_mag == 0 else max_mag / mean_mag
+
+
                     p_scores.append(score)
                     prob_map[y:y_end, x:x_end] = score
 
@@ -374,7 +376,8 @@ class ImageForensicsModule:
             ratio_threshold = 0.75 # Lowe's Ratio Test (típico 0.7 a 0.8)
             
             for m_list in matches:
-                if len(m_list) < 3: continue
+                if len(m_list) < 3:
+                    continue
                 
                 # m_list[0] = auto-match (dist 0)
                 # m_list[1] = melhor candidato
@@ -395,7 +398,6 @@ class ImageForensicsModule:
             # Uma cópia real terá vários keypoints se movendo na mesma direção e distância.
             # Ruído aleatório (cabelo, grama) terá direções caóticas.
             
-            coherent_matches = []
             if initial_matches:
                 # Calcular vetor de deslocamento (dx, dy) para cada match
                 vectors = []
@@ -418,19 +420,22 @@ class ImageForensicsModule:
                 min_cluster_size = int(self.config.get('copymove_min_cluster', 4)) # Mínimo de pontos concordantes para validar a cópia
                 
                 for i in range(len(vectors)):
-                    if i in used_indices: continue
+                    if i in used_indices:
+                        continue
                     
                     v_ref = vectors[i]
                     cluster_indices = [i]
                     
                     for j in range(i+1, len(vectors)):
-                        if j in used_indices: continue
+                        if j in used_indices:
+                            continue
                         
                         v_test = vectors[j]
                         
                         # Diff Angular (considerando prob ciclica)
                         diff_ang = abs(v_ref['ang'] - v_test['ang'])
-                        if diff_ang > np.pi: diff_ang = 2*np.pi - diff_ang
+                        if diff_ang > np.pi:
+                            diff_ang = 2*np.pi - diff_ang
                         
                         # Diff Comprimento
                         len_ratio = abs(v_ref['len'] - v_test['len']) / (v_ref['len'] + 1e-6)
@@ -536,7 +541,8 @@ class ImageForensicsModule:
             std_energy = np.std(block_stats)
             
             # Validar se std é zero (imagem flat)
-            if std_energy == 0: std_energy = 1e-6
+            if std_energy == 0:
+                std_energy = 1e-6
             
             # Detectar Outliers (Blocos com energia muito diferente da média global ou local)
             # Para visualização, normalizar o mapa
@@ -603,8 +609,9 @@ class ImageForensicsModule:
                     y_end = min(y + block_size, h)
                     x_end = min(x + block_size, w)
                     block = noise_residual[y:y_end, x:x_end]
-                    
-                    if block.size == 0: continue
+
+                    if block.size == 0:
+                        continue
                     
                     # Calcular métricas
                     var = np.var(block)
@@ -668,7 +675,7 @@ class ImageForensicsModule:
                 "global_stats": {
                     "mean_variance": float(global_var_mean),
                     "std_variance": float(global_var_std),
-                    "mean_entropy": float(np.mean(entropies))
+                    "mean_entropy": float(np.mean(entropies)) if entropies else 0.0
                 },
                 "outliers_detected": len(outliers),
                 "conclusion": "Regiões com desvio de ruído > 3 sigma detectadas." if outliers else "Distribuição de ruído homogênea (dentro dos parâmetros estatísticos)."
@@ -681,8 +688,11 @@ class ImageForensicsModule:
         """Calcula entropia de Shannon para um bloco de imagem (uint8)."""
         # Calcular histograma
         counts = np.bincount(image_block.flatten(), minlength=256)
+        total = counts.sum()
+        if total == 0:
+            return 0.0
         # Probabilidades
-        p = counts / counts.sum()
+        p = counts / total
         p = p[p > 0] # Remover zeros para log
         ent = -np.sum(p * np.log2(p))
         return ent
@@ -745,34 +755,27 @@ class ImageForensicsModule:
             # Verificar se arquivo foi criado
             if not temp_jpg_path.exists():
                 return {"status": "error", "error": f"Temp JPEG was not created at {temp_jpg_path}"}
-            
-            # Ler imagem recomprimida
-            compressed = self._read_image_safe(temp_jpg_path)
-            
-            # Verificar se leitura foi bem sucedida
-            if compressed is None:
+
+            try:
+                # Ler imagem recomprimida
+                compressed = self._read_image_safe(temp_jpg_path)
+
+                # Verificar se leitura foi bem sucedida
+                if compressed is None:
+                    return {"status": "error", "error": f"Failed to read recompressed JPEG for ELA from {temp_jpg_path}"}
+
+                # Verificar se dimensões são compatíveis
+                if compressed.shape != orig.shape:
+                    return {"status": "error", "error": f"Dimension mismatch: original {orig.shape} vs compressed {compressed.shape}"}
+
+                # Calcular diferença absoluta (Ruído de compressão perdido)
+                diff = cv2.absdiff(orig, compressed)
+            finally:
                 temp_jpg_path.unlink(missing_ok=True)
-                return {"status": "error", "error": f"Failed to read recompressed JPEG for ELA from {temp_jpg_path}"}
-            
-            # Verificar se dimensões são compatíveis
-            if compressed.shape != orig.shape:
-                temp_jpg_path.unlink(missing_ok=True)
-                return {"status": "error", "error": f"Dimension mismatch: original {orig.shape} vs compressed {compressed.shape}"}
-            
-            # Calcular diferença absoluta (Ruído de compressão perdido)
-            diff = cv2.absdiff(orig, compressed)
-            
-            # Remover temp
-            temp_jpg_path.unlink(missing_ok=True)
-            
-            # Amplificar a diferença para visualização (Scale)
-            # Valor típico: multiplicar por 10 ou 20.
+
             # Convert to float to avoid saturation early
             diff_float = diff.astype(np.float32)
-            
-            # Amplificação Base
-            ela_image = diff_float * 15.0 
-            
+
             # Métrica: Score de Diferença Global (Global Difference Score)
             # Representa o Erro Médio Absoluto (MAE) por pixel/canal.
             ela_score = np.mean(diff_float)
@@ -826,8 +829,8 @@ class ImageForensicsModule:
     def _add_colorbar(self, img, colormap=cv2.COLORMAP_JET, label_min="Baixo", label_max="Alto", val_min=None, val_max=None):
         """Adiciona uma legenda com valores numéricos, largura dinâmica e posicionamento preciso."""
         try:
-            h, w = img.shape[:2]
-            
+            h = img.shape[0]
+
             # Formatar labels com valores se existirem
             txt_max = str(label_max)
             txt_min = str(label_min)
@@ -849,8 +852,8 @@ class ImageForensicsModule:
             color = (30, 30, 30) # Cinza escuro
             
             # 1. Calcular tamanho necessário para o texto
-            size_max, baseline_max = cv2.getTextSize(txt_max, font, f_scale, thickness)
-            size_min, baseline_min = cv2.getTextSize(txt_min, font, f_scale, thickness)
+            size_max, _ = cv2.getTextSize(txt_max, font, f_scale, thickness)
+            size_min, _ = cv2.getTextSize(txt_min, font, f_scale, thickness)
             
             # Largura da legenda: margem esq + barra + gap + texto + margem dir
             max_text_w = max(size_max[0], size_min[0])
@@ -861,7 +864,8 @@ class ImageForensicsModule:
             
             # 3. Barra de cores
             bar_h = h - (2 * v_margin)
-            if bar_h <= 0: bar_h = h
+            if bar_h <= 0:
+                bar_h = h
             
             bar_pixels = np.linspace(255, 0, bar_h).astype(np.uint8).reshape(-1, 1)
             bar_pixels = np.repeat(bar_pixels, bar_w, axis=1)

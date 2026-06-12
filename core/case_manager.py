@@ -1,7 +1,8 @@
 from pathlib import Path
-from typing import Optional
+
 from .config import CASES_DIR
 from .logger import Logger
+
 
 class CaseManager:
     """Gerenciador de estrutura de diretórios e logs por caso."""
@@ -17,7 +18,7 @@ class CaseManager:
         self.log_path = self.case_dir / "execution.log"
         self.evidence_manifest_path = self.case_dir / "evidence_manifest.json"
         
-        self.logger: Optional[Logger] = None
+        self.logger: Logger | None = None
 
     def setup(self) -> Logger:
         """Cria estrutura de pastas e inicializa o logger."""

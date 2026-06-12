@@ -4,23 +4,29 @@ Diálogo de configurações avançadas para a GUI.
 Este módulo fornece uma interface gráfica para ajustar os parâmetros
 de análise forense, usando AnalysisConfig como backend.
 """
-import json
 import logging
-from pathlib import Path
-from typing import Optional
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox,
-    QPushButton, QTabWidget, QWidget, QFormLayout, QMessageBox
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt
 
-from core.config_schema import AnalysisConfig, DEFAULT_CONFIG
+from core.config import APP_DIR
+from core.config_schema import DEFAULT_CONFIG, AnalysisConfig
 
 _logger = logging.getLogger(__name__)
 
-from core.config import APP_DIR
 CONFIG_FILE = APP_DIR / "config.json"
 
 
@@ -65,7 +71,7 @@ def save_config(config: AnalysisConfig) -> bool:
 class SettingsDialog(QDialog):
     """Diálogo de configurações avançadas."""
     
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("Configurações Avançadas")
         self.resize(400, 300)
@@ -442,15 +448,15 @@ class SettingsDialog(QDialog):
             "Quantas vezes o sistema tentará reconectar antes de desistir<br>"
             "e parar o processamento.<br><br>"
             "<ul>"
-            "<li><b>5:</b> Desiste rápido (ex: 5 × 60s = 5 min).</li>"
-            "<li><b>10:</b> Padrão (ex: 10 × 60s = 10 min).</li>"
-            "<li><b>60:</b> Persistente (ex: 60 × 60s = 1 hora).</li>"
+            "<li><b>5:</b> Desiste rápido (ex: 5 x 60s = 5 min).</li>"
+            "<li><b>10:</b> Padrão (ex: 10 x 60s = 10 min).</li>"
+            "<li><b>60:</b> Persistente (ex: 60 x 60s = 1 hora).</li>"
             "</ul>"
         )
         add_param(form_cluster, "Máximo de Tentativas:", self.spin_retry_max, msg_retry_max)
         
         # --- Separador visual ---
-        from PySide6.QtWidgets import QLineEdit, QGroupBox
+        from PySide6.QtWidgets import QLineEdit
         
         sep_label = QLabel("<hr><b>📂 Cópia Local de Arquivos</b>")
         form_cluster.addRow(sep_label)
@@ -481,7 +487,6 @@ class SettingsDialog(QDialog):
         btn_browse_local.setMaximumWidth(40)
         btn_browse_local.setToolTip("Selecionar pasta local")
         
-        from PySide6.QtWidgets import QFileDialog as _QFD
         btn_browse_local.clicked.connect(
             lambda: self._browse_local_dir()
         )

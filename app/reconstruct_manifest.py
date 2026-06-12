@@ -2,6 +2,7 @@ import json
 import re
 from pathlib import Path
 
+
 def reconstruct_manifest(results_dir: Path):
     print(f"Buscando arquivos na pasta: {results_dir}")
     if not results_dir.exists():
@@ -45,7 +46,7 @@ def reconstruct_manifest(results_dir: Path):
     manifest_list = []
     
     # Ordenar por prefixo
-    sorted_prefixes = sorted(list(entries.keys()))
+    sorted_prefixes = sorted(entries.keys())
     
     for prefix in sorted_prefixes:
         data = entries[prefix]
@@ -55,23 +56,20 @@ def reconstruct_manifest(results_dir: Path):
         fa_file = data["analysis_files"].get("file_analysis")
         if fa_file:
             try:
-                with open(results_dir / fa_file, 'r', encoding='utf-8') as f:
+                with open(results_dir / fa_file, encoding='utf-8') as f:
                     fa_data = json.load(f)
                     # Tentar vários campos possíveis de metadados
-                    if "metadata" in fa_data and "format" in fa_data["metadata"]:
-                        if "filename" in fa_data["metadata"]["format"]:
-                            found_filename = Path(fa_data["metadata"]["format"]["filename"]).name
-            except:
+                    fmt = fa_data.get("metadata", {}).get("format", {})
+                    if "filename" in fmt:
+                        found_filename = Path(fmt["filename"]).name
+            except Exception:
                 pass
         
         # Fallback: Tirar o prefixo numérico (ex: 01_nomedoarquivo -> nomedoarquivo)
         if not found_filename:
             # Padrão: 01_NomeDoArquivo
             m = re.match(r'^\d+_(.*)$', prefix)
-            if m:
-                found_filename = m.group(1)
-            else:
-                found_filename = prefix
+            found_filename = m.group(1) if m else prefix
         
         # Se o filename ainda parece um thumb ou algo errado, limpar
         if found_filename.startswith("thumb_"):
@@ -102,6 +100,5 @@ def reconstruct_manifest(results_dir: Path):
     print(f"SALVO. Manifesto com {len(manifest_list)} entradas gerado em {manifest_path}")
 
 if __name__ == "__main__":
-    import sys
     results_path = Path("D:/CFTV-SINOP/analise_2/analise_2/results")
     reconstruct_manifest(results_path)

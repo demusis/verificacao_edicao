@@ -1,10 +1,10 @@
 import hashlib
-import subprocess
 from pathlib import Path
-from typing import Union, Optional
+
+from core.subprocess_utils import LONG_TIMEOUT, run_command
 
 
-def calculate_file_hash(filepath: Union[str, Path], algorithm: str = 'sha512', chunk_size: int = 8192) -> str:
+def calculate_file_hash(filepath: str | Path, algorithm: str = 'sha512', chunk_size: int = 8192) -> str:
     """Calcula o hash de um arquivo lendo em chunks."""
     filepath = Path(filepath)
     hasher = hashlib.new(algorithm)
@@ -16,8 +16,8 @@ def calculate_file_hash(filepath: Union[str, Path], algorithm: str = 'sha512', c
     return hasher.hexdigest()
 
 
-def calculate_stream_hash(filepath: Union[str, Path], stream_type: str = 'a', 
-                          stream_index: int = 0, algorithm: str = 'sha512') -> Optional[str]:
+def calculate_stream_hash(filepath: str | Path, stream_type: str = 'a', 
+                          stream_index: int = 0, algorithm: str = 'sha512') -> str | None:
     """
     Calcula o hash de um fluxo específico dentro de um container usando FFmpeg.
     
@@ -38,7 +38,7 @@ def calculate_stream_hash(filepath: Union[str, Path], stream_type: str = 'a',
         ]
         
         # FFmpeg escreve o hash no stdout no formato: ALGORITHM=HASH
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = run_command(cmd, check=True, timeout=LONG_TIMEOUT)
         output = result.stdout.strip()
         
         if "=" in output:

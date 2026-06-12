@@ -4,11 +4,12 @@ Classe base abstrata para módulos de análise forense.
 Este módulo define a interface padrão que todos os módulos de análise
 devem implementar, garantindo consistência e facilidade de manutenção.
 """
-from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import Any, Callable, Optional
 import json
 import logging
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 from core.case_manager import CaseManager
 from core.config_schema import AnalysisConfig
@@ -45,7 +46,7 @@ class BaseAnalysisModule(ABC):
     def __init__(
         self,
         case_manager: CaseManager,
-        config: Optional[AnalysisConfig] = None
+        config: AnalysisConfig | None = None
     ) -> None:
         """Inicializa o módulo de análise.
         
@@ -62,7 +63,7 @@ class BaseAnalysisModule(ABC):
         self,
         input_file: Path,
         output_filename: str = "analysis.json",
-        progress_callback: Optional[Callable[[str], None]] = None
+        progress_callback: Callable[[str], None] | None = None
     ) -> dict[str, Any]:
         """Executa a análise no arquivo de entrada.
         
@@ -139,7 +140,7 @@ class BaseAnalysisModule(ABC):
     def _notify_progress(
         self,
         message: str,
-        callback: Optional[Callable[[str], None]] = None
+        callback: Callable[[str], None] | None = None
     ) -> None:
         """Notifica progresso da análise.
         

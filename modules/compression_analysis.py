@@ -1,10 +1,13 @@
-from pathlib import Path
 import json
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 from scipy.fft import fft
-from typing import Dict, List, Any
-from core.case_manager import CaseManager
+
 from adapters.ffmpeg_adapter import FFmpegAdapter
+from core.case_manager import CaseManager
+
 
 class CompressionAnalysisModule:
     """
@@ -63,14 +66,14 @@ class CompressionAnalysisModule:
                 json.dump(result_data, f, indent=2, ensure_ascii=False)
                 
             self.logger.log("MODULE_SUCCESS", {"module": "CompressionAnalysis", "conclusion": result_data['conclusion']})
-            
-        except Exception as e:
-            self.logger.log("MODULE_ERROR", {"module": "CompressionAnalysis", "error": str(e)})
-            # Não dar raise para não parar o pipeline inteiro se falhar (é módulo avançado)
-            # Mas para debug vamos printar
-            print(f"Erro no módulo de Compressão: {e}")
+            return result_data
 
-    def _analyze_benford(self, sizes: List[int]) -> Dict[str, Any]:
+        except Exception as e:
+            # Não dar raise para não parar o pipeline inteiro se falhar (é módulo avançado)
+            self.logger.log("MODULE_ERROR", {"module": "CompressionAnalysis", "error": str(e)})
+            return {"error": str(e)}
+
+    def _analyze_benford(self, sizes: list[int]) -> dict[str, Any]:
         """Calcula a conformidade com a Lei de Benford (Primeiro Dígito)."""
         # Extrair primeiro dígito
         first_digits = [int(str(s)[0]) for s in sizes if s > 0]
@@ -110,7 +113,7 @@ class CompressionAnalysisModule:
             "status": status
         }
 
-    def _analyze_fourier(self, sizes: List[int]) -> Dict[str, Any]:
+    def _analyze_fourier(self, sizes: list[int]) -> dict[str, Any]:
         """Aplica FFT para identificar periodicidade dominante (Tamanho do GOP)."""
         # Se double compressed com GOPs diferentes, pode haver picos estranhos.
         # Normalment, o pico principal é 1/GOP_Size.
@@ -137,11 +140,9 @@ class CompressionAnalysisModule:
         peak_idx = np.argmax(amplitude[min_idx:]) + min_idx
         peak_freq = xf[peak_idx]
         
-        if peak_freq > 0:
-            estimated_period = 1 / peak_freq # Em frames
-        else:
-            estimated_period = 0
-            
+        estimated_period = 1 / peak_freq if peak_freq > 0 else 0  # Em frames
+
+
         # Analisar "ruído" espectral (pode indicar double quantization)
         # Se houver muitos picos fortes concorrentes, é suspeito.
         noise_level = np.mean(amplitude)

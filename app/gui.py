@@ -1,39 +1,55 @@
+import contextlib
+import json
+import os
+import socket
 import sys
 from pathlib import Path
-import os
-import json
-import socket
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                               QHBoxLayout, QLabel, QLineEdit, QPushButton, 
-                               QFileDialog, QTextEdit, QProgressBar, QMessageBox)
-from PySide6.QtCore import Qt, QThread, Signal
+
+from PySide6.QtCore import QThread, Signal
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QHBoxLayout,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 # Permitir execução direta sem -m
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Importações do Core e Modules
+from app.cluster_dashboard import ClusterDashboard
+from app.settings_dialog import SettingsDialog, load_config
 from core.case_manager import CaseManager
-from modules.file_analysis import FileAnalysisModule
-from modules.continuity import ContinuityModule
+from core.config_schema import AnalysisConfig
+from core.subprocess_utils import run_command
+from modules.audio_deepfake import AudioDeepfakeModule  # AUDIO
+from modules.audio_forensics import AudioForensicsModule  # AUDIO
 from modules.compression_analysis import CompressionAnalysisModule
+from modules.continuity import ContinuityModule
+from modules.deepfake_analysis import DeepfakeAnalysisModule  # NEW
+from modules.file_analysis import FileAnalysisModule
+from modules.image_forensics import ImageForensicsModule  # NEW
 from modules.prnu_analysis import PrnuAnalysisModule
 from modules.quantization_analysis import QuantizationAnalysisModule
 from modules.structure_analysis import StructureAnalysisModule
-from modules.image_forensics import ImageForensicsModule # NEW
-from modules.deepfake_analysis import DeepfakeAnalysisModule # NEW
-from modules.audio_forensics import AudioForensicsModule  # AUDIO
-from modules.audio_deepfake import AudioDeepfakeModule  # AUDIO
-from app.settings_dialog import SettingsDialog, DEFAULT_CONFIG, load_config
-from app.cluster_dashboard import ClusterDashboard
+
 try:
-    from app.version import VERSION, BUILD_DATE
+    from app.version import BUILD_DATE, VERSION
 except ImportError:
     VERSION = "Dev"
     BUILD_DATE = "Unknown"
 
-from modules.reporting import ReportingModule
-import json
 import threading
+
+from modules.reporting import ReportingModule
+
 
 class HeartbeatThread(threading.Thread):
     """Segmento que atualiza o arquivo de registro do nó em segundo plano."""
@@ -66,11 +82,13 @@ class AnalysisWorker(QThread):
     progress_max = Signal(int)
     finished = Signal(bool, str) # success, message
     
-    def __init__(self, input_files: list[Path], output_dir: Path, case_name: str = None, config: dict = None):
+    def __init__(self, input_files: list[Path], output_dir: Path,
+                 case_name: str | None = None, config: AnalysisConfig | None = None):
         super().__init__()
         self.input_files = input_files
         self.output_dir = output_dir
-        self.config = config or {}
+        # AnalysisConfig é obrigatório: o código acessa atributos (ex: prnu_frame_limit)
+        self.config = config or AnalysisConfig()
         self.case_name = case_name
         self._is_cancelled = False
         
@@ -86,12 +104,11 @@ class AnalysisWorker(QThread):
     
     def _has_video_stream(self, file_path: Path) -> bool:
         """Verifica se o arquivo realmente contém um stream de vídeo (não apenas áudio)."""
-        import subprocess
         try:
-            result = subprocess.run(
-                ["ffprobe", "-v", "error", "-select_streams", "v:0", 
+            result = run_command(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0",
                  "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(file_path)],
-                capture_output=True, text=True, timeout=10
+                timeout=10
             )
             if result.returncode != 0:
                 # Se ffprobe der erro (ex: nome de arquivo com caracteres estranhos),
@@ -231,7 +248,7 @@ class AnalysisWorker(QThread):
             if getattr(self.config, 'resume_processing', True) and manifest_path.exists():
                 self.progress.emit("Procurando processamento anterior para retomar...")
                 try:
-                    with open(manifest_path, 'r', encoding='utf-8') as f:
+                    with open(manifest_path, encoding='utf-8') as f:
                         existing_manifest = json.load(f)
                     for entry in existing_manifest:
                         fname = entry.get("filename")
@@ -288,7 +305,7 @@ class AnalysisWorker(QThread):
                             prnu_path = cm.results_dir / prnu_json_name
                             if prnu_path.exists():
                                 try:
-                                    with open(prnu_path, 'r', encoding='utf-8') as f:
+                                    with open(prnu_path, encoding='utf-8') as f:
                                         prnu_data = json.load(f)
                                         if prnu_data.get("status") == "extracted" and "fingerprint_file" in prnu_data:
                                             prnu_fingerprints.append({
@@ -324,7 +341,7 @@ class AnalysisWorker(QThread):
                     lock_path = cm.results_dir / f"{idx+1:02d}_{input_file.stem}.lock"
                     if lock_path.exists():
                         try:
-                            with open(lock_path, 'r', encoding='utf-8') as lf:
+                            with open(lock_path, encoding='utf-8') as lf:
                                 lock_content = lf.read().strip()
                             
                             my_host = socket.gethostname()
@@ -342,7 +359,7 @@ class AnalysisWorker(QThread):
                                     try:
                                         import psutil
                                         is_running = psutil.pid_exists(int(pid))
-                                    except:
+                                    except Exception:
                                         # Fallback se não tiver psutil: assume que se o host é igual mas o PID é diferente, é outra instância rodando
                                         is_running = True 
                                     
@@ -361,7 +378,7 @@ class AnalysisWorker(QThread):
                                 else:
                                     self.progress.emit(f"[{idx+1}/{total_files}] OCUPADO (PC {lock_content}): {input_file.name}")
                                     continue
-                        except Exception as e:
+                        except Exception:
                             self.progress.emit(f"[{idx+1}/{total_files}] LOCK INVÁLIDO detectado. Tentando assumir...")
                     
                     # Tentar travar o arquivo para esta instância específica
@@ -383,8 +400,9 @@ class AnalysisWorker(QThread):
                             node_registration["current_file"] = input_file.name
                             node_registration["current_index"] = idx + 1
                             # A thread de background escreverá isso em breve, mas forçamos uma agora
-                            with open(node_info_path, 'w', encoding='utf-8') as nf:
-                                json.dump(node_registration, nf, indent=2, ensure_ascii=False)
+                            if node_info_path:
+                                with open(node_info_path, 'w', encoding='utf-8') as nf:
+                                    json.dump(node_registration, nf, indent=2, ensure_ascii=False)
                         except Exception:
                             pass
                         # --- CÓPIA LOCAL TEMPORÁRIA (otimização de I/O) ---
@@ -434,13 +452,14 @@ class AnalysisWorker(QThread):
                         
                         # Salvar manifesto de forma distribuida (RELOAD + MERGE)
                         try:
-                            import time, random
+                            import random
+                            import time
                             # Pequeno delay aleatório para reduzir colisões de escrita em rede SMB
                             time.sleep(random.uniform(0.1, 0.4))
                             
                             m_data = []
                             if manifest_path.exists():
-                                with open(manifest_path, 'r', encoding='utf-8') as mf_read:
+                                with open(manifest_path, encoding='utf-8') as mf_read:
                                     m_data = json.load(mf_read)
                             
                             # Pegar a última entrada gerada por este PC
@@ -470,10 +489,8 @@ class AnalysisWorker(QThread):
                     finally:
                         # SEMPRE remover o lock ao terminar ou se der erro
                         if lock_path.exists():
-                            try:
+                            with contextlib.suppress(Exception):
                                 lock_path.unlink()
-                            except:
-                                pass
 
                 except Exception as file_err:
                     if self._is_network_error(file_err):
@@ -557,7 +574,7 @@ class AnalysisWorker(QThread):
             final_data = []
             try:
                 if manifest_path.exists():
-                    with open(manifest_path, 'r', encoding='utf-8') as mf_read:
+                    with open(manifest_path, encoding='utf-8') as mf_read:
                         final_data = json.load(mf_read)
                 
                 # Merge com o que este nó produziu/pulou
@@ -567,7 +584,8 @@ class AnalysisWorker(QThread):
                 
                 with open(manifest_path, 'w', encoding='utf-8') as mf_write:
                     json.dump(final_data, mf_write, indent=2, ensure_ascii=False)
-            except:
+            except Exception as merge_err:
+                self.progress.emit(f"AVISO: Falha ao consolidar manifesto final: {merge_err}")
                 final_data = batch_manifest # Fallback
 
             # Reporting - Tenta gerar o consolidado FINAL se parecer que o lote acabou
@@ -583,7 +601,7 @@ class AnalysisWorker(QThread):
                     hb_thread.stop()
                     hb_thread.join(timeout=2)
                 try:
-                    if node_info_path.exists():
+                    if node_info_path and node_info_path.exists():
                         node_info_path.unlink()
                 except Exception:
                     pass
@@ -596,7 +614,7 @@ class AnalysisWorker(QThread):
                     hb_thread.stop()
                     hb_thread.join(timeout=2)
                 try:
-                    if node_info_path.exists():
+                    if node_info_path and node_info_path.exists():
                         node_info_path.unlink()
                 except Exception:
                     pass
@@ -611,7 +629,7 @@ class AnalysisWorker(QThread):
                     node_info_path.unlink()
             except Exception:
                 pass
-            self.progress.emit(f"ERRO: {str(e)}")
+            self.progress.emit(f"ERRO: {e!s}")
             import traceback
             traceback.print_exc()
             self.finished.emit(False, str(e))
@@ -645,17 +663,6 @@ class AnalysisWorker(QThread):
                 "analysis_files": {}
             }
             
-            if has_video_stream:
-                # === FLUXO DE VÍDEO ===
-                
-                # Nomes de saída
-                out_fa = f"{prefix}_file_analysis.json"
-                out_cont = f"{prefix}_continuity.json"
-                out_comp = f"{prefix}_compression.json"
-                out_prnu = f"{prefix}_prnu.json"
-                out_struct = f"{prefix}_structure.json"
-                out_quant = f"{prefix}_quantization.json"
-                
             # === THUMBNAIL GENERATION ===
             thumb_filename = f"thumb_{input_file.stem}.jpg"
             thumb_path = cm.results_dir / thumb_filename
@@ -663,12 +670,11 @@ class AnalysisWorker(QThread):
             try:
                 if has_video_stream:
                     # Extract first frame
-                    import subprocess
-                    subprocess.run([
-                        "ffmpeg", "-y", "-i", str(input_file), 
-                        "-vframes", "1", "-update", "1", "-q:v", "2", 
+                    run_command([
+                        "ffmpeg", "-y", "-i", str(input_file),
+                        "-vframes", "1", "-update", "1", "-q:v", "2",
                         str(thumb_path)
-                    ], check=False, capture_output=True)
+                    ], timeout=120)
                 elif is_video_container or is_audio_file:
                     # Arquivo apenas-áudio - sem thumbnail
                     thumb_filename = None
@@ -679,7 +685,7 @@ class AnalysisWorker(QThread):
                     img_array = np.fromfile(str(input_file), dtype=np.uint8)
                     img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
                     if img is not None:
-                        h, w = img.shape[:2]
+                        w = img.shape[1]
                         if w > 800:
                             scale = 800 / w
                             img = cv2.resize(img, (0,0), fx=scale, fy=scale)
@@ -688,7 +694,7 @@ class AnalysisWorker(QThread):
                             with open(thumb_path, "wb") as f:
                                 f.write(buffer)
             except Exception as e:
-                print(f"Thumbnail error: {e}")
+                self.progress.emit(f"[{input_file.name}] AVISO: Falha ao gerar thumbnail: {e}")
                 thumb_filename = None
 
             if thumb_filename:
@@ -708,7 +714,7 @@ class AnalysisWorker(QThread):
                 if not (cm.results_dir / out_fa).exists():
                     FileAnalysisModule(cm).run(input_file, output_filename=out_fa)
                 else:
-                    self.progress.emit(f"  └─ RECUPERADO (Arquivo já processado)")
+                    self.progress.emit("  └─ RECUPERADO (Arquivo já processado)")
                 manifest_entry["analysis_files"]["file_analysis"] = out_fa
                 
                 # Continuity
@@ -716,7 +722,7 @@ class AnalysisWorker(QThread):
                 if not (cm.results_dir / out_cont).exists():
                     ContinuityModule(cm).run(input_file, output_filename=out_cont)
                 else:
-                    self.progress.emit(f"  └─ RECUPERADO (Arquivo já processado)")
+                    self.progress.emit("  └─ RECUPERADO (Arquivo já processado)")
                 manifest_entry["analysis_files"]["continuity_analysis"] = out_cont
 
                 # Structure Analysis (Atom Map)
@@ -725,7 +731,7 @@ class AnalysisWorker(QThread):
                     if not (cm.results_dir / out_struct).exists():
                         StructureAnalysisModule(cm).run(input_file, output_filename=out_struct)
                     else:
-                        self.progress.emit(f"  └─ RECUPERADO (Arquivo já processado)")
+                        self.progress.emit("  └─ RECUPERADO (Arquivo já processado)")
                     manifest_entry["analysis_files"]["structure_analysis"] = out_struct
                 
                 # Compression Analysis
@@ -734,7 +740,7 @@ class AnalysisWorker(QThread):
                     if not (cm.results_dir / out_comp).exists():
                         CompressionAnalysisModule(cm).run(input_file, output_filename=out_comp)
                     else:
-                        self.progress.emit(f"  └─ RECUPERADO (Arquivo já processado)")
+                        self.progress.emit("  └─ RECUPERADO (Arquivo já processado)")
                     manifest_entry["analysis_files"]["compression_analysis"] = out_comp
 
                 # Quantization Analysis
@@ -743,7 +749,7 @@ class AnalysisWorker(QThread):
                     if not (cm.results_dir / out_quant).exists():
                         QuantizationAnalysisModule(cm).run(input_file, output_filename=out_quant)
                     else:
-                        self.progress.emit(f"  └─ RECUPERADO (Arquivo já processado)")
+                        self.progress.emit("  └─ RECUPERADO (Arquivo já processado)")
                     manifest_entry["analysis_files"]["quantization_analysis"] = out_quant
                 
                 # PRNU Analysis (Video)
@@ -756,11 +762,12 @@ class AnalysisWorker(QThread):
                         prnu_mod.frame_limit = self.config.prnu_frame_limit
                         prnu_res = prnu_mod.run(input_file, output_filename=out_prnu)
                     else:
-                        self.progress.emit(f"  └─ RECUPERADO (Arquivo já processado)")
+                        self.progress.emit("  └─ RECUPERADO (Arquivo já processado)")
                         try:
-                            with open(cm.results_dir / out_prnu, 'r', encoding='utf-8') as f:
+                            with open(cm.results_dir / out_prnu, encoding='utf-8') as f:
                                 prnu_res = json.load(f)
-                        except: prnu_res = {"status": "error"}
+                        except Exception:
+                            prnu_res = {"status": "error"}
 
                     manifest_entry["analysis_files"]["prnu_analysis"] = out_prnu
                     
@@ -824,30 +831,28 @@ class AnalysisWorker(QThread):
                     if getattr(self.config, 'report_audio_metadata', True):
                         self.progress.emit(f"[{input_file.name}] Análise Forense de Áudio...")
                         if not (cm.results_dir / out_audio).exists():
-                            audio_res = AudioForensicsModule(cm, config=self.config).run(
+                            AudioForensicsModule(cm, config=self.config).run(
                                 input_file, output_filename=out_audio, progress_callback=self.progress.emit
                             )
                         else:
-                            self.progress.emit(f"  └─ RECUPERADO (Áudio analisado)")
+                            self.progress.emit("  └─ RECUPERADO (Áudio analisado)")
                         manifest_entry["analysis_files"]["audio_analysis"] = out_audio
                 except Exception as audio_err:
                     self.progress.emit(f"[{input_file.name}] AVISO: Falha na análise de áudio: {audio_err}")
-                    print(f"Audio analysis error: {audio_err}")
                 
                 # Deepfake de Voz
                 try:
                     if getattr(self.config, 'report_audio_deepfake', True):
                         self.progress.emit(f"[{input_file.name}] Detecção de Deepfake de Voz...")
                         if not (cm.results_dir / out_audio_df).exists():
-                            audio_df_res = AudioDeepfakeModule(cm, config=self.config).run(
+                            AudioDeepfakeModule(cm, config=self.config).run(
                                 input_file, output_filename=out_audio_df, progress_callback=self.progress.emit
                             )
                         else:
-                            self.progress.emit(f"  └─ RECUPERADO (Deepfake de voz analisado)")
+                            self.progress.emit("  └─ RECUPERADO (Deepfake de voz analisado)")
                         manifest_entry["analysis_files"]["audio_deepfake"] = out_audio_df
                 except Exception as audio_df_err:
                     self.progress.emit(f"[{input_file.name}] AVISO: Falha na detecção de deepfake de voz: {audio_df_err}")
-                    print(f"Audio deepfake error: {audio_df_err}")
             
             # === FASE FINAL: GERAÇÃO DE PDF INDIVIDUAL ===
             # Tratada como uma fase de processamento que pode ser pulada se o arquivo existir.
@@ -860,11 +865,11 @@ class AnalysisWorker(QThread):
                     try:
                         from modules.reporting import ReportingModule
                         ReportingModule(cm, config=self.config).generate_individual(idx, manifest_entry)
-                        self.progress.emit(f"  └─ Relatório PDF gerado com sucesso")
+                        self.progress.emit("  └─ Relatório PDF gerado com sucesso")
                     except Exception as pdf_err:
                         self.progress.emit(f"  └─ ❌ Erro ao gerar PDF: {pdf_err}")
                 else:
-                    self.progress.emit(f"  └─ RECUPERADO (Relatório já existente)")
+                    self.progress.emit("  └─ RECUPERADO (Relatório já existente)")
                 
                 # Registrar o PDF no manifesto se ele existir
                 if pdf_path.exists():
@@ -907,7 +912,7 @@ class PrnuCompareWorker(QThread):
             
             if prnu_res.get("status") == "extracted":
                 npy_path = cm.results_dir / prnu_res["fingerprint_file"]
-                self.progress.emit(f"  ✅ Fingerprint extraído com sucesso.")
+                self.progress.emit("  ✅ Fingerprint extraído com sucesso.")
                 return {"name": file_path.name, "path": npy_path}
             else:
                 self.progress.emit(f"  ⚠️ Falha: {prnu_res.get('error', 'desconhecido')}")
@@ -933,7 +938,7 @@ class PrnuCompareWorker(QThread):
             
             reference_fps = []
             step = 0
-            for idx, ref_file in enumerate(self.reference_files):
+            for ref_file in self.reference_files:
                 if self._is_cancelled:
                     self.finished.emit(False, "Cancelado")
                     return
@@ -944,7 +949,7 @@ class PrnuCompareWorker(QThread):
                     reference_fps.append(fp)
             
             external_fps = []
-            for idx, ext_file in enumerate(self.external_files):
+            for ext_file in self.external_files:
                 if self._is_cancelled:
                     self.finished.emit(False, "Cancelado")
                     return
@@ -1024,8 +1029,8 @@ class PrnuCompareWorker(QThread):
                 if pdf_path.exists():
                     self.progress.emit(f"✅ Relatório PDF gerado em: {cm.report_dir}")
                 else:
-                    self.progress.emit(f"⚠️ Arquivo .tex gerado, mas a compilação do PDF falhou.")
-                    self.progress.emit(f"   Verifique se o pdflatex está instalado e no PATH.")
+                    self.progress.emit("⚠️ Arquivo .tex gerado, mas a compilação do PDF falhou.")
+                    self.progress.emit("   Verifique se o pdflatex está instalado e no PATH.")
                     self.progress.emit(f"   O .tex pode ser compilado manualmente em: {cm.report_dir}")
             except Exception as rep_err:
                 self.progress.emit(f"❌ Erro ao gerar PDF: {rep_err}")

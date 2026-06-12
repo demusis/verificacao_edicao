@@ -5,13 +5,14 @@ Extrai hash de integridade, metadados do container, estrutura GOP
 e detecta indícios de processamento/edição.
 """
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
+from adapters.ffmpeg_adapter import FFmpegAdapter
 from core.case_manager import CaseManager
 from core.config_schema import AnalysisConfig
 from core.hashing import calculate_file_hash
-from adapters.ffmpeg_adapter import FFmpegAdapter
 
 
 class FileAnalysisModule:
@@ -43,7 +44,7 @@ class FileAnalysisModule:
     def __init__(
         self,
         case_manager: CaseManager,
-        config: Optional[AnalysisConfig] = None
+        config: AnalysisConfig | None = None
     ) -> None:
         """Inicializa o módulo de análise de arquivo.
         
@@ -60,7 +61,7 @@ class FileAnalysisModule:
         self,
         input_file: Path,
         output_filename: str = "file_analysis.json",
-        progress_callback: Optional[Callable[[str], None]] = None
+        progress_callback: Callable[[str], None] | None = None
     ) -> dict[str, Any]:
         """Executa análise básica do arquivo.
         
@@ -185,7 +186,7 @@ class FileAnalysisModule:
         """
         traces: list[dict[str, str]] = []
         
-        def check_tags(tags: Optional[dict], source: str) -> None:
+        def check_tags(tags: dict | None, source: str) -> None:
             if not tags:
                 return
             for key, value in tags.items():

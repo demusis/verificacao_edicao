@@ -8,14 +8,14 @@ detecção de descontinuidade de fase e silêncio anômalo.
 import json
 import logging
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, ClassVar
 
 import numpy as np
 
-from core.case_manager import CaseManager
-from core.config_schema import AnalysisConfig
 from core.hashing import calculate_file_hash, calculate_stream_hash
+from core.subprocess_utils import run_command
 from modules.base_module import BaseAnalysisModule
 
 _logger = logging.getLogger(__name__)
@@ -33,14 +33,16 @@ class AudioForensicsModule(BaseAnalysisModule):
     """
     
     MODULE_NAME = "AudioForensics"
-    
-    SUPPORTED_EXTENSIONS = {'.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.opus'}
+
+    SUPPORTED_EXTENSIONS: ClassVar[set[str]] = {
+        '.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.opus'
+    }
     
     def run(
         self,
         input_file: Path,
         output_filename: str = "audio_analysis.json",
-        progress_callback: Optional[Callable[[str], None]] = None
+        progress_callback: Callable[[str], None] | None = None
     ) -> dict[str, Any]:
         """Executa análise forense completa no arquivo de áudio.
         
@@ -113,27 +115,34 @@ class AudioForensicsModule(BaseAnalysisModule):
                 "ffprobe", "-v", "quiet", "-print_format", "json",
                 "-show_format", "-show_streams", str(input_file)
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            result = run_command(cmd, check=True)
             probe_data = json.loads(result.stdout)
-            
+
             # Extrair informações relevantes
             format_info = probe_data.get("format", {})
             streams = probe_data.get("streams", [])
-            
+
             audio_stream = next(
                 (s for s in streams if s.get("codec_type") == "audio"),
                 {}
             )
-            
+
+            def _num(value: Any, cast: type, default: int = 0):
+                """Converte campos do ffprobe tolerando None/'N/A'."""
+                try:
+                    return cast(value)
+                except (TypeError, ValueError):
+                    return default
+
             metadata = {
                 "format": format_info.get("format_name", "unknown"),
                 "format_long": format_info.get("format_long_name", "unknown"),
-                "duration_seconds": float(format_info.get("duration", 0)),
-                "bitrate_kbps": int(format_info.get("bit_rate", 0)) // 1000,
-                "size_bytes": int(format_info.get("size", 0)),
+                "duration_seconds": _num(format_info.get("duration"), float),
+                "bitrate_kbps": _num(format_info.get("bit_rate"), int) // 1000,
+                "size_bytes": _num(format_info.get("size"), int),
                 "codec": audio_stream.get("codec_name", "unknown"),
                 "codec_long": audio_stream.get("codec_long_name", "unknown"),
-                "sample_rate": int(audio_stream.get("sample_rate", 0)),
+                "sample_rate": _num(audio_stream.get("sample_rate"), int),
                 "channels": audio_stream.get("channels", 0),
                 "channel_layout": audio_stream.get("channel_layout", "unknown"),
                 "bits_per_sample": audio_stream.get("bits_per_sample", 0),
@@ -183,7 +192,7 @@ class AudioForensicsModule(BaseAnalysisModule):
         
         return "; ".join(notes) if notes else "Nenhuma anomalia evidente nos metadados"
     
-    def _load_audio(self, input_file: Path) -> tuple[Optional[np.ndarray], int, Optional[str]]:
+    def _load_audio(self, input_file: Path) -> tuple[np.ndarray | None, int, str | None]:
         """Carrega arquivo de áudio usando librosa com amostragem configurável.
         
         Estratégia:
@@ -192,8 +201,9 @@ class AudioForensicsModule(BaseAnalysisModule):
         3. Meio: N trechos aleatórios de X segundos (config.audio_random_segments)
         """
         try:
-            import librosa
             import random
+
+            import librosa
             
             # Obter duração total
             duration = librosa.get_duration(path=str(input_file))
@@ -370,11 +380,14 @@ class AudioForensicsModule(BaseAnalysisModule):
         # Segmentar e comparar ruído em diferentes partes
         n_segments = 4
         segment_len = len(rms_db) // n_segments
-        segment_floors = []
-        for i in range(n_segments):
-            start = i * segment_len
-            end = start + segment_len
-            segment_floors.append(float(np.percentile(rms_db[start:end], 10)))
+        if segment_len > 0:
+            segment_floors = [
+                float(np.percentile(rms_db[i * segment_len:(i + 1) * segment_len], 10))
+                for i in range(n_segments)
+            ]
+        else:
+            # Áudio curto demais para segmentar: usa o floor global
+            segment_floors = [float(noise_floor)]
         
         floor_variance = float(np.var(segment_floors))
         
@@ -541,8 +554,10 @@ class AudioForensicsModule(BaseAnalysisModule):
                     start_sample = start_frame * hop_length
                     end_sample = min(i * hop_length, len(audio))
                     segment = audio[start_sample:end_sample]
-                    
-                    is_digital_silence = bool(np.max(np.abs(segment)) < 1e-6)
+
+                    is_digital_silence = bool(
+                        segment.size > 0 and np.max(np.abs(segment)) < 1e-6
+                    )
                     
                     # Classificar por posição
                     if start_time < margin_seconds:
@@ -553,11 +568,9 @@ class AudioForensicsModule(BaseAnalysisModule):
                         position = "middle"
                     
                     # Ajustar anomaly_score por posição e tipo
+                    # middle = altamente suspeito; bordas = comum em gravações de celular
                     if is_digital_silence:
-                        if position == "middle":
-                            anomaly_score = 1.0  # Altamente suspeito
-                        else:
-                            anomaly_score = 0.2  # Comum em gravações de celular
+                        anomaly_score = 1.0 if position == "middle" else 0.2
                     else:
                         anomaly_score = 0.1  # Silêncio natural (não digital)
                     

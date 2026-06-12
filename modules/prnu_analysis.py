@@ -1,9 +1,12 @@
+import json
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pywt
-from pathlib import Path
+
 from core.case_manager import CaseManager
-import json
+
 
 class PrnuAnalysisModule:
     """
@@ -21,17 +24,18 @@ class PrnuAnalysisModule:
         
         try:
             # 1. Extração Frame a Frame
-            fingerprint = self._extract_fingerprint(input_file)
-            
-            # 2. Salvar Fingerprint (.npy)
+            fingerprint, frames_used = self._extract_fingerprint(input_file)
+
+            # 2. Salvar Fingerprint (.npy) apenas se a extração funcionou
             npy_filename = output_filename.replace(".json", ".npy")
-            npy_path = self.cm.results_dir / npy_filename
-            np.save(npy_path, fingerprint)
-            
+            if fingerprint is not None:
+                npy_path = self.cm.results_dir / npy_filename
+                np.save(npy_path, fingerprint)
+
             # 3. Salvar Metadados (.json)
             result = {
-                "fingerprint_file": npy_filename,
-                "frames_used": self.frame_limit,
+                "fingerprint_file": npy_filename if fingerprint is not None else None,
+                "frames_used": frames_used,
                 "resolution": fingerprint.shape if fingerprint is not None else "N/A",
                 "status": "extracted" if fingerprint is not None else "failed"
             }
@@ -51,8 +55,12 @@ class PrnuAnalysisModule:
                 json.dump({"status": "error", "error": str(e)}, f)
             return {"status": "error"}
 
-    def _extract_fingerprint(self, input_path: Path):
-        """Lê frames/imagem, remove conteúdo (denoise) e extrai o resíduo de ruído."""
+    def _extract_fingerprint(self, input_path: Path) -> tuple[np.ndarray | None, int]:
+        """Lê frames/imagem, remove conteúdo (denoise) e extrai o resíduo de ruído.
+
+        Returns:
+            Tupla (fingerprint ou None, número de frames efetivamente usados).
+        """
         # Tentar abrir como imagem primeiro
         # Usar imdecode para suportar paths com acento (Windows)
         try:
@@ -65,51 +73,48 @@ class PrnuAnalysisModule:
              # Processing single image
              gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
              fingerprint = self._get_noise_residual_wavelet(gray)
-             return fingerprint.astype(np.float32)
+             return fingerprint.astype(np.float32), 1
 
         # Se não for imagem, tentar como vídeo
         cap = cv2.VideoCapture(str(input_path))
-        if not cap.isOpened():
-            raise IOError(f"Cannot open file: {input_path}")
-            
         noise_sum = None
         count = 0
-        
-        # Leitura sequencial (MVP). Ideal seria aleatória ou keyframes.
-        while count < self.frame_limit:
-            ret, frame = cap.read()
-            if not ret:
-                break
-                
-            # Converter para Grayscale (PRNU geralmente é feito em Y ou Grayscale)
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            h, w = gray.shape
-            
-            # Inicializar acumulador se necessário
-            if noise_sum is None:
-                noise_sum = np.zeros((h, w), dtype=np.float32)
-                
-            # Extrair Ruído (Wavelet Denoising)
-            # W = I - Denoised(I)
-            # Usando db4 nível 2 ou 3 é comum.
-            # PyWt: wavedec2 -> threshold -> waverec2
-            
-            noise_residual = self._get_noise_residual_wavelet(gray)
-            noise_sum += noise_residual
-            count += 1
-            
-        cap.release()
-        
+        try:
+            if not cap.isOpened():
+                raise OSError(f"Cannot open file: {input_path}")
+
+            # Leitura sequencial (MVP). Ideal seria aleatória ou keyframes.
+            while count < self.frame_limit:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Converter para Grayscale (PRNU geralmente é feito em Y ou Grayscale)
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                h, w = gray.shape
+
+                # Inicializar acumulador se necessário
+                if noise_sum is None:
+                    noise_sum = np.zeros((h, w), dtype=np.float32)
+
+                # Extrair Ruído (Wavelet Denoising)
+                # W = I - Denoised(I)
+                noise_residual = self._get_noise_residual_wavelet(gray)
+                noise_sum += noise_residual
+                count += 1
+        finally:
+            cap.release()
+
         if count == 0:
-            return None
-            
+            return None, 0
+
         # Média
         fingerprint = noise_sum / count
-        
+
         # Zero-mean (remove artifacts)
         # fingerprint -= np.mean(fingerprint) # Opcional, o filtro wavelet ja deve remover low-freq
-        
-        return fingerprint.astype(np.float32)
+
+        return fingerprint.astype(np.float32), count
 
     def _get_noise_residual_wavelet(self, img_gray):
         """Extrai ruído usando decomposição Wavelet (Filtro de Wiener aproximado ou threshold)."""
@@ -216,8 +221,8 @@ class PrnuAnalysisModule:
             y_grid, x_grid = np.ogrid[-peak_y:h-peak_y, -peak_x:w-peak_x]
             mask = x_grid**2 + y_grid**2 > radius**2
             
-            energy = np.mean(correlation[mask]**2)
-            
+            energy = np.mean(correlation[mask]**2) if mask.any() else 0.0
+
             pce = (peak_val**2) / energy if energy > 0 else 0
             
             return {

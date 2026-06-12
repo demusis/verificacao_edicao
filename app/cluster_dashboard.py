@@ -6,20 +6,28 @@ e apresenta o status de processamento de todos os PCs e instâncias.
 
 import json
 import socket
-import os
-from pathlib import Path
 from datetime import datetime
-from typing import Optional, Any
+from pathlib import Path
 
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
-    QProgressBar, QFileDialog, QSpinBox, QWidget,
-    QFrame, QMessageBox, QMenu
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
 )
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QIcon
-
 
 # Extensões de mídia suportadas pelo app (para contar arquivos de origem)
 MEDIA_EXTENSIONS = {
@@ -38,9 +46,9 @@ class ClusterDashboard(QDialog):
         self.resize(1100, 750)
         self.setMinimumSize(900, 550)
 
-        self.case_dir: Optional[Path] = None          # Pasta raiz do caso
-        self.results_dir: Optional[Path] = None       # Pasta results/ dentro do caso
-        self.source_dir: Optional[Path] = None        # Pasta onde estão os arquivos originais (para contar total)
+        self.case_dir: Path | None = None          # Pasta raiz do caso
+        self.results_dir: Path | None = None       # Pasta results/ dentro do caso
+        self.source_dir: Path | None = None        # Pasta onde estão os arquivos originais (para contar total)
         self.total_input_files: int = 0
         self.scan_interval_sec: int = 5
 
@@ -310,7 +318,7 @@ class ClusterDashboard(QDialog):
         # Fonte 1: _node_*.json (fonte mais confiável — total exato informado pela instância)
         for node_file in res_dir.glob("_node_*.json"):
             try:
-                with open(node_file, 'r', encoding='utf-8') as f:
+                with open(node_file, encoding='utf-8') as f:
                     node_data = json.load(f)
                 node_total = node_data.get("total_files", 0)
                 if node_total > 0:
@@ -334,7 +342,7 @@ class ClusterDashboard(QDialog):
         manifest_path = res_dir / "batch_manifest.json"
         if manifest_path.exists():
             try:
-                with open(manifest_path, 'r', encoding='utf-8') as f:
+                with open(manifest_path, encoding='utf-8') as f:
                     manifest_data = json.load(f)
                     manifest_count = len(manifest_data)
                 if manifest_count > 0:
@@ -346,7 +354,7 @@ class ClusterDashboard(QDialog):
         lock_count = len(list(res_dir.glob("*.lock")))
         if manifest_path.exists():
             try:
-                with open(manifest_path, 'r', encoding='utf-8') as f:
+                with open(manifest_path, encoding='utf-8') as f:
                     m_data = json.load(f)
                     m_count = len(m_data)
                 candidates.append(m_count + lock_count)
@@ -405,20 +413,20 @@ class ClusterDashboard(QDialog):
         now = datetime.now().strftime("%H:%M:%S")
 
         # Pré-indexar arquivos existentes para detectar fase de processamento
-        existing_jsons = set(f.name for f in res_dir.glob("*.json"))
+        existing_jsons = {f.name for f in res_dir.glob("*.json")}
         
         # Encontrar pasta de relatórios
         report_dir = c_dir / "report"
         existing_pdfs = set()
         if report_dir.exists():
-            existing_pdfs = set(f.name for f in report_dir.glob("*.pdf"))
+            existing_pdfs = {f.name for f in report_dir.glob("*.pdf")}
 
         # ── 1. Carregar manifesto (arquivos concluídos) ──
         manifest_path = res_dir / "batch_manifest.json"
         completed_files = {}  # filename -> entry
         if manifest_path.exists():
             try:
-                with open(manifest_path, 'r', encoding='utf-8') as f:
+                with open(manifest_path, encoding='utf-8') as f:
                     manifest = json.load(f)
                 for entry in manifest:
                     fname = entry.get("filename", "")
@@ -444,10 +452,7 @@ class ClusterDashboard(QDialog):
                 lock_stem = lock_file.stem
                 # Remover prefixo numérico (ex: "04_video_name" -> "video_name")
                 parts = lock_stem.split("_", 1)
-                if len(parts) > 1 and parts[0].isdigit():
-                    display_name = parts[1]
-                else:
-                    display_name = lock_stem
+                display_name = parts[1] if len(parts) > 1 and parts[0].isdigit() else lock_stem
 
                 active_locks[lock_stem] = {
                     "host": host,
@@ -479,7 +484,7 @@ class ClusterDashboard(QDialog):
         node_heartbeats = {}  # "host:pid" -> {"last_heartbeat": datetime, "data": dict}
         for node_file in res_dir.glob("_node_*.json"):
             try:
-                with open(node_file, 'r', encoding='utf-8') as f:
+                with open(node_file, encoding='utf-8') as f:
                     ndata = json.load(f)
                 hb_str = ndata.get("last_heartbeat") or ndata.get("started_at", "")
                 if hb_str:
@@ -499,7 +504,7 @@ class ClusterDashboard(QDialog):
 
         # ── 5. Agrupar por nó (host:pid) ──
         nodes: dict[str, dict] = {}  # "host:pid" -> {"host", "pid", "files": [...]}
-        for lock_stem, lock_info in active_locks.items():
+        for lock_info in active_locks.values():
             node_key = f"{lock_info['host']}:{lock_info['pid']}"
             if node_key not in nodes:
                 nodes[node_key] = {
@@ -568,7 +573,7 @@ class ClusterDashboard(QDialog):
                 # Sem _node_*.json → versão antiga ou registro perdido
                 # Usar mtime do lock como estimativa
                 lock_ages = []
-                for ls, li in active_locks.items():
+                for li in active_locks.values():
                     if li["host"] == host and li["pid"] == pid:
                         lock_path = self.results_dir / li["lock_file"]
                         if lock_path.exists():
@@ -654,7 +659,7 @@ class ClusterDashboard(QDialog):
             ("report_pdf",        "Gerando Relatório"),
         ]
         
-        last_completed: Optional[str] = None
+        last_completed: str | None = None
         for suffix, label in phases:
             if suffix == "report_pdf":
                 # PDF nomenclature is different: relatorio_XX_filename.pdf
@@ -671,7 +676,7 @@ class ClusterDashboard(QDialog):
             return "1/7 Metadados"
         
         # Encontrar a próxima fase
-        for i, (suffix, label) in enumerate(phases):
+        for i, (_suffix, label) in enumerate(phases):
             if label == last_completed:
                 if i + 1 < len(phases):
                     return str(phases[i+1][1])
@@ -686,7 +691,6 @@ class ClusterDashboard(QDialog):
         if not res_dir:
             return
 
-        from datetime import datetime, timedelta
         import time
         
         # Limite de segurança: 10 minutos sem alteração
@@ -703,13 +707,15 @@ class ClusterDashboard(QDialog):
             try:
                 if (now - lf.stat().st_mtime) / 60 > STALE_THRESHOLD:
                     stale_locks.append(lf)
-            except Exception: pass
-            
+            except Exception:
+                pass
+
         for nf in all_node_files:
             try:
                 if (now - nf.stat().st_mtime) / 60 > STALE_THRESHOLD:
                     stale_nodes.append(nf)
-            except Exception: pass
+            except Exception:
+                pass
 
         orphans = stale_locks + stale_nodes
 
@@ -726,28 +732,23 @@ class ClusterDashboard(QDialog):
         
         if stale_locks:
             details.append(f"\n🔒 {len(stale_locks)} lock(s) expirado(s):")
-            # Usar loop normal em vez de slice para evitar problemas de inferência de lista
-            count = 0
-            for lf in stale_locks:
-                if count >= 5: break
+            for lf in stale_locks[:5]:
                 try:
                     content = lf.read_text(encoding='utf-8').strip()
                     details.append(f"  • {lf.name}  ← {content}")
-                except Exception: details.append(f"  • {lf.name}")
-                count += 1
+                except Exception:
+                    details.append(f"  • {lf.name}")
             if len(stale_locks) > 5:
                 details.append(f"  ... (+{len(stale_locks)-5} outros)")
 
         if stale_nodes:
             details.append(f"\n📋 {len(stale_nodes)} registro(s) de nó expirados:")
-            count = 0
-            for nf in stale_nodes:
-                if count >= 5: break
+            for nf in stale_nodes[:5]:
                 try:
                     data = json.loads(nf.read_text(encoding='utf-8'))
                     details.append(f"  • {nf.name}  ← {data.get('hostname','?')} (Inativo)")
-                except Exception: details.append(f"  • {nf.name}")
-                count += 1
+                except Exception:
+                    details.append(f"  • {nf.name}")
             if len(stale_nodes) > 5:
                 details.append(f"  ... (+{len(stale_nodes)-5} outros)")
 
@@ -814,8 +815,6 @@ class ClusterDashboard(QDialog):
         res_dir = self.results_dir
         if res_dir is None:
             return
-        # Assertion specifically for strict IDE type checkers
-        assert res_dir is not None
 
         reply = QMessageBox.question(
             self, "🚀 Forçar Liberação",
@@ -834,7 +833,8 @@ class ClusterDashboard(QDialog):
                 try:
                     node_file.unlink()
                     removed += 1
-                except: pass
+                except Exception:
+                    pass
                 
             # 2. Procurar e remover arquivos .lock que contenham "HOSTNAME:PID"
             target_id = f"{host}:{pid}"
@@ -844,7 +844,8 @@ class ClusterDashboard(QDialog):
                     if content == target_id:
                         lf.unlink()
                         removed += 1
-                except: pass
+                except Exception:
+                    pass
                 
             QMessageBox.information(
                 self, "Ação Concluída", 

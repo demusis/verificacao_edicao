@@ -5,13 +5,12 @@ Este módulo implementa técnicas heurísticas para detectar áudio
 gerado por síntese de voz (TTS, voice cloning).
 """
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 import numpy as np
 
-from core.case_manager import CaseManager
-from core.config_schema import AnalysisConfig
 from modules.base_module import BaseAnalysisModule
 
 _logger = logging.getLogger(__name__)
@@ -33,7 +32,7 @@ class AudioDeepfakeModule(BaseAnalysisModule):
         self,
         input_file: Path,
         output_filename: str = "audio_deepfake.json",
-        progress_callback: Optional[Callable[[str], None]] = None
+        progress_callback: Callable[[str], None] | None = None
     ) -> dict[str, Any]:
         """Executa detecção de áudio sintético.
         
@@ -112,7 +111,7 @@ class AudioDeepfakeModule(BaseAnalysisModule):
         self._save_results(results, output_filename)
         return results
     
-    def _load_audio(self, input_file: Path) -> tuple[Optional[np.ndarray], int]:
+    def _load_audio(self, input_file: Path) -> tuple[np.ndarray | None, int]:
         """Carrega arquivo de áudio usando librosa com amostragem configurável.
         
         Estratégia:
@@ -121,8 +120,9 @@ class AudioDeepfakeModule(BaseAnalysisModule):
         3. Meio: N trechos aleatórios de X segundos (config.audio_random_segments)
         """
         try:
-            import librosa
             import random
+
+            import librosa
             
             # Obter duração total
             duration = librosa.get_duration(path=str(input_file))
@@ -251,7 +251,6 @@ class AudioDeepfakeModule(BaseAnalysisModule):
         mfccs = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=13)
         
         # Estatísticas dos MFCCs
-        mfcc_means = np.mean(mfccs, axis=1)
         mfcc_stds = np.std(mfccs, axis=1)
         
         # Coeficiente de variação do centroid
@@ -294,7 +293,7 @@ class AudioDeepfakeModule(BaseAnalysisModule):
         
         # Extrair pitch usando pyin
         try:
-            f0, voiced_flag, voiced_probs = librosa.pyin(
+            f0, _voiced_flag, _voiced_probs = librosa.pyin(
                 audio, fmin=50, fmax=500, sr=sr
             )
         except Exception:

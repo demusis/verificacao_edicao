@@ -1,17 +1,20 @@
-import subprocess
+import contextlib
+import json
 import os
 import re
-import json
-from pathlib import Path
-from core.case_manager import CaseManager
-
-from core.utils import get_timestamp_iso
 from datetime import datetime
+from pathlib import Path
+from typing import ClassVar
+
+from core.case_manager import CaseManager
+from core.subprocess_utils import run_command
+from core.utils import get_timestamp_iso
+
 
 class ReportingModule:
     """Gerador de Relatórios (LaTeX -> PDF)."""
     
-    def __init__(self, case_manager: CaseManager, config: dict = None):
+    def __init__(self, case_manager: CaseManager, config: dict | None = None):
         self.cm = case_manager
         self.logger = self.cm.get_logger()
         # Prioridade: Config injetada > Config do arquivo > Dict vazio
@@ -25,9 +28,9 @@ class ReportingModule:
         config_path = Path("config.json")
         if config_path.exists():
             try:
-                with open(config_path, 'r', encoding='utf-8') as f:
+                with open(config_path, encoding='utf-8') as f:
                     return json.load(f)
-            except:
+            except Exception:
                 pass
         return {}
 
@@ -36,7 +39,7 @@ class ReportingModule:
         try:
             dt = datetime.fromisoformat(iso_str)
             return dt.strftime(r"%d/%m/%Y %H:%M (UTC%z)")
-        except:
+        except Exception:
             return iso_str
 
     def generate(self):
@@ -78,7 +81,7 @@ class ReportingModule:
             json_path = self.cm.results_dir / json_filename
             if json_path.exists():
                 try:
-                    with open(json_path, 'r', encoding='utf-8') as jf:
+                    with open(json_path, encoding='utf-8') as jf:
                         file_entry["analyses"][analysis_type] = json.load(jf)
                 except Exception as e:
                     self.logger.log("INDIVIDUAL_DATA_LOAD_ERROR", {"file": json_filename, "error": str(e)})
@@ -372,7 +375,7 @@ class ReportingModule:
         latex = re.sub(r'\n{3,}', '\n\n', latex)
         
         # Remover opções do enumitem (incompatível com algumas instalações MiKTeX)
-        latex = re.sub(r'\\begin\{itemize\}\[[^\]]*\]', r'\\begin{itemize}', latex)
+        latex = re.sub(r'\\begin\{itemize\}\[[^\]]*\]', r'\\begin{itemize}', latex)
         
         # Escrever e compilar
         tex_path = self.cm.report_dir / "prnu_comparison.tex"
@@ -402,7 +405,7 @@ class ReportingModule:
         if manifest_path.exists():
             # Modo Batch
             try:
-                with open(manifest_path, 'r', encoding='utf-8') as f:
+                with open(manifest_path, encoding='utf-8') as f:
                     manifest = json.load(f)
                     
                 for item in manifest:
@@ -417,7 +420,7 @@ class ReportingModule:
                     for analysis_type, json_filename in item.get('analysis_files', {}).items():
                         json_path = self.cm.results_dir / json_filename
                         if json_path.exists():
-                            with open(json_path, 'r', encoding='utf-8') as jf:
+                            with open(json_path, encoding='utf-8') as jf:
                                 file_entry["analyses"][analysis_type] = json.load(jf)
                                 
                     base_data["files"].append(file_entry)
@@ -428,7 +431,7 @@ class ReportingModule:
             matrix_path = self.cm.results_dir / "prnu_matrix.json"
             if matrix_path.exists():
                 try:
-                    with open(matrix_path, 'r', encoding='utf-8') as f:
+                    with open(matrix_path, encoding='utf-8') as f:
                         base_data["prnu_matrix"] = json.load(f)
                 except Exception as e:
                     self.logger.log("PRNU_MATRIX_LOAD_ERROR", {"error": str(e)})
@@ -438,12 +441,13 @@ class ReportingModule:
             
             # Mapeamento de nomes de arquivo padrão para chaves de análise
             for res_file in self.cm.results_dir.glob("*.json"):
-                if res_file.name == "batch_manifest.json": continue
+                if res_file.name == "batch_manifest.json":
+                    continue
                 
                 # Ex: file_analysis.json -> file_analysis
                 key = res_file.stem
                 try:
-                    with open(res_file, 'r', encoding='utf-8') as f:
+                    with open(res_file, encoding='utf-8') as f:
                         single_entry["analyses"][key] = json.load(f)
                 except Exception as e:
                     self.logger.log("DATA_LOAD_ERROR", {"file": res_file.name, "error": str(e)})
@@ -454,7 +458,7 @@ class ReportingModule:
         return base_data
 
     # Banco de Referências Bibliográficas (ABNT)
-    REFERENCES_DB = {
+    REFERENCES_DB: ClassVar[dict[str, list[str]]] = {
         "ELA": [
             r"KRAWETZ, N. A Picture's Worth: Digital Image Analysis and Forensics. In: \textit{Black Hat Briefings}, Las Vegas, 2007.",
             r"LIN, Z. et al. Fast, Automatic and Fine-Grained Tampered JPEG Image Detection via DCT Coefficient Analysis. \textit{Pattern Recognition}, 2009."
@@ -504,7 +508,7 @@ class ReportingModule:
              r"MICHAŁEK, Marcin. Metadata in audio files compliant with ISO/IEC 14496-12 and their characteristics as well as the evaluation of usability in the investigation of the authenticity of recordings. \textit{Problems of Forensic Sciences}, v. 115, p. 241-261, 2018."
         ],
         "BENFORD_VIDEO": [
-             r"VARGA, D. Benford’s Law and Perceptual Features for Face Image Quality Assessment \textit{Signals 4}, no. 4: 859-876. https://doi.org/10.3390/signals4040047, 2023."
+             r"VARGA, D. Benford's Law and Perceptual Features for Face Image Quality Assessment \textit{Signals 4}, no. 4: 859-876. https://doi.org/10.3390/signals4040047, 2023."
         ],
         "PERIODICITY": [
              r"BIANCHI, T. et al. Detection of Non-Aligned Double JPEG Compression with Estimation of Primary Compression Parameters. \textit{IEEE International Conference on Image Processing (ICIP)}, 2011.",
@@ -527,7 +531,8 @@ class ReportingModule:
     def _add_refs(self, latex, key):
         """Adiciona bloco de referências bibliográficas se existirem."""
         refs = self.REFERENCES_DB.get(key)
-        if not refs: return latex
+        if not refs:
+            return latex
         
         latex += r"\par\vspace{0.3cm}"
         latex += r"\noindent \textbf{\footnotesize Referências do Procedimento:}"
@@ -572,24 +577,20 @@ class ReportingModule:
         for ext in ['.aux', '.toc', '.out']:
             aux_path = output_dir / (tex_file.stem + ext)
             if aux_path.exists():
-                try:
+                with contextlib.suppress(Exception):
                     aux_path.unlink()
-                except Exception:
-                    pass
         
         for i in range(3):
             # cwd=str(output_dir) é crucial
-            res = subprocess.run(cmd, cwd=str(output_dir), capture_output=True, text=True, encoding='utf-8', errors='ignore')
+            res = run_command(cmd, cwd=str(output_dir))
             if res.returncode != 0:
                 if i == 0:
                     # Limpar auxiliares corrompidos pelo pass falho antes de tentar novamente
                     for ext in ['.aux', '.toc', '.out']:
                         aux_path = output_dir / (tex_file.stem + ext)
                         if aux_path.exists():
-                            try:
+                            with contextlib.suppress(Exception):
                                 aux_path.unlink()
-                            except Exception:
-                                pass
                     continue
                 raise RuntimeError(f"pdflatex failed (Pass {i+1}): {res.stderr or res.stdout}")
 
@@ -714,7 +715,7 @@ class ReportingModule:
                     if k == 'filename':
                         try:
                             val_str = os.path.basename(str(v))
-                        except:
+                        except Exception:
                             val_str = str(v)
                     else:
                         val_str = str(v)
@@ -962,7 +963,7 @@ class ReportingModule:
                         try:
                             ts_val = float(ts)
                             ts_str = f"{ts_val:.3f}s"
-                        except:
+                        except (TypeError, ValueError):
                             ts_str = str(ts)
                         
                         msg = esc(anomaly.get('message', ''))
@@ -989,8 +990,10 @@ class ReportingModule:
                 # User said "softwares de edição organizam ... padronizada".
                 # Capture is usually mdat first.
                 color = "white"
-                if "Fast-Start" in conc: color = "warning!5"
-                elif "Capture" in conc: color = "success!5"
+                if "Fast-Start" in conc:
+                    color = "warning!5"
+                elif "Capture" in conc:
+                    color = "success!5"
                 
                 latex += f"\\begin{{tcolorbox}}[colback={color},colframe=gray,title=Estrutura Física: {conc}]"
                 latex += f"{interp}"
@@ -1004,11 +1007,13 @@ class ReportingModule:
                     size = atom.get('size', 0)
                     offset = atom.get('offset', 0)
                     
-                    desc = ""
-                    if atype == 'ftyp': desc = r" \textit{(Header)}"
-                    elif atype == 'moov': desc = r" \textit{(Index/Metadados)}"
-                    elif atype == 'mdat': desc = r" \textit{(Stream de Mídia)}"
-                    elif atype == 'free': desc = r" \textit{(Padding)}"
+                    atom_descriptions = {
+                        'ftyp': r" \textit{(Header)}",
+                        'moov': r" \textit{(Index/Metadados)}",
+                        'mdat': r" \textit{(Stream de Mídia)}",
+                        'free': r" \textit{(Padding)}",
+                    }
+                    desc = atom_descriptions.get(atype, "")
                     
                     # Highlight critical atoms
                     if atype in ['moov', 'mdat']:
@@ -1096,9 +1101,12 @@ class ReportingModule:
                         score_fmt = f"{sc:.4f}"
                         st = esc(str(b_data.get('status', 'N/A')))
                         
-                        if sc > 0.15: row_col = r"\rowcolor{danger!15}"
-                        elif sc > 0.10: row_col = r"\rowcolor{warning!15}"
-                        else: row_col = ""
+                        if sc > 0.15:
+                            row_col = r"\rowcolor{danger!15}"
+                        elif sc > 0.10:
+                            row_col = r"\rowcolor{warning!15}"
+                        else:
+                            row_col = ""
                         
                     seg_name = seg.upper() if seg != 'global' else "GLOBAL"
                     latex += f"{row_col} \\textbf{{{seg_name}}} & {score_fmt} & {st} \\\\ \\hline \n"
@@ -1277,7 +1285,7 @@ class ReportingModule:
                 try:
                     f_size_mb = float(f_size) / (1024*1024)
                     latex += f"\\textbf{{Tamanho do Arquivo}} & {f_size_mb:.2f} MB \\\\ \\hline \n"
-                except:
+                except (TypeError, ValueError):
                     latex += f"\\textbf{{Tamanho do Arquivo}} & {esc(str(f_size))} bytes \\\\ \\hline \n"
                     
                 latex += f"\\textbf{{Formato Container}} & {esc(fmt.get('format_name', 'N/A'))} \\\\ \\hline \n"
@@ -2260,7 +2268,8 @@ class ReportingModule:
                         note = res.get('scaling_note')
                         
                         pce_str = f"{pce:.1f}"
-                        if note: pce_str += "*"
+                        if note:
+                            pce_str += "*"
                         
                         result_str = r"\textbf{MATCH}" if match else "Inconclusivo"
                         result_color = "success" if match else "black"
@@ -2319,7 +2328,8 @@ class ReportingModule:
         sorted_keys = sorted(self.config.keys())
         
         for key in sorted_keys:
-            if key.startswith("report_"): continue
+            if key.startswith("report_"):
+                continue
             
             val = self.config[key]
             val_str = "Ativado" if val is True else "Desativado" if val is False else str(val)

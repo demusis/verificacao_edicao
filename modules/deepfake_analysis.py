@@ -1,9 +1,10 @@
-import cv2
-import numpy as np
 import os
 import sys
-from pathlib import Path
+
+import cv2
+import numpy as np
 from skimage.feature import local_binary_pattern
+
 
 def get_haarcascades_path():
     """Retorna o caminho para os arquivos haarcascades, compatível com PyInstaller."""
@@ -83,38 +84,40 @@ class DeepfakeAnalysisModule:
             
             frame_count = 0
             analyzed_frames = 0
-            
+
             # Histórico para análise temporal
             history_consistency = []
             history_fft = []
             history_texture = []
-            
-            while True:
-                ret, frame = cap.read()
-                if not ret: break
-                
-                frame_count += 1
-                if frame_count % sample_rate != 0: continue
-                
-                # Analisar Frame
-                f_res = self._analyze_frame(frame)
-                analyzed_frames += 1
-                
-                # Acumular máximos (Pior caso)
-                result["detected_faces"] = max(result["detected_faces"], f_res["detected_faces"])
-                result["detected_bodies"] = max(result["detected_bodies"], f_res["detected_bodies"])
-                
-                # Guardar histórico para Jitter
-                history_consistency.append(f_res["consistency_score"])
-                history_fft.append(f_res["frequency_score"])
-                history_texture.append(f_res["texture_score"])
-                
-                # Se encontrar algo muito grave em um frame, reportar
-                if f_res["is_suspicious"]:
-                    if len(result["details"]) < 5: # Limitar logs
-                        result["details"].append(f"Frame {frame_count}: " + "; ".join(f_res["details"]))
 
-            cap.release()
+            try:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    frame_count += 1
+                    if frame_count % sample_rate != 0:
+                        continue
+
+                    # Analisar Frame
+                    f_res = self._analyze_frame(frame)
+                    analyzed_frames += 1
+
+                    # Acumular máximos (Pior caso)
+                    result["detected_faces"] = max(result["detected_faces"], f_res["detected_faces"])
+                    result["detected_bodies"] = max(result["detected_bodies"], f_res["detected_bodies"])
+
+                    # Guardar histórico para Jitter
+                    history_consistency.append(f_res["consistency_score"])
+                    history_fft.append(f_res["frequency_score"])
+                    history_texture.append(f_res["texture_score"])
+
+                    # Se encontrar algo muito grave em um frame, reportar
+                    if f_res["is_suspicious"] and len(result["details"]) < 5:  # Limitar logs
+                        result["details"].append(f"Frame {frame_count}: " + "; ".join(f_res["details"]))
+            finally:
+                cap.release()
             
             if analyzed_frames == 0:
                 result["status"] = "skipped"
@@ -132,12 +135,8 @@ class DeepfakeAnalysisModule:
             result["temporal_jitter"] = int((jitter_cons + jitter_fft + jitter_tex) / 3)
             
             # Se algum frame foi suspeito, o vídeo é suspeito
-            for frame_cons in history_consistency:
-                if frame_cons > 70: result["is_suspicious"] = True
-            for frame_fft in history_fft:
-                if frame_fft > 70: result["is_suspicious"] = True
-            for frame_tex in history_texture:
-                if frame_tex > 70: result["is_suspicious"] = True
+            if any(v > 70 for v in history_consistency + history_fft + history_texture):
+                result["is_suspicious"] = True
             
             jitter_threshold = int(self.config.get('deepfake_jitter_threshold', 15))
             if result["temporal_jitter"] > jitter_threshold:
@@ -224,8 +223,10 @@ class DeepfakeAnalysisModule:
 
         # 2. Máscaras
         mask_subject = np.zeros_like(gray)
-        for (x,y,w,h) in faces: cv2.rectangle(mask_subject, (x,y), (x+w,y+h), 255, -1)
-        for (x,y,w,h) in bodies: cv2.rectangle(mask_subject, (x,y), (x+w,y+h), 255, -1)
+        for (x, y, w, h) in faces:
+            cv2.rectangle(mask_subject, (x, y), (x+w, y+h), 255, -1)
+        for (x, y, w, h) in bodies:
+            cv2.rectangle(mask_subject, (x, y), (x+w, y+h), 255, -1)
         mask_background = cv2.bitwise_not(mask_subject)
         
         # 3. Consistência de Ruído (Proxy de Splicing)
@@ -240,7 +241,8 @@ class DeepfakeAnalysisModule:
 
         if diff_ratio > (int(self.config.get('deepfake_noise_threshold', 50)) / 100.0):
             res["details"].append(f"Inconsistência de Ruído Sujeito/Fundo ({diff_ratio:.2f})")
-            if diff_ratio > 0.7: res["is_suspicious"] = True
+            if diff_ratio > 0.7:
+                res["is_suspicious"] = True
 
         # 4. FFT e Textura (Faces) - Foco em AI/Deepfake
         max_fft = 0
@@ -309,9 +311,12 @@ class DeepfakeAnalysisModule:
         
         # Decisão para imagem global
         indicators = 0
-        if res["frequency_score"] > 65: indicators += 1
-        if res["texture_score"] > 65: indicators += 1
-        if res["noise_score"] > 70: indicators += 1
+        if res["frequency_score"] > 65:
+            indicators += 1
+        if res["texture_score"] > 65:
+            indicators += 1
+        if res["noise_score"] > 70:
+            indicators += 1
         
         if indicators >= 2 or res["frequency_score"] > 80:
             res["is_suspicious"] = True
@@ -332,11 +337,13 @@ class DeepfakeAnalysisModule:
                     lap = cv2.Laplacian(block, cv2.CV_64F)
                     variances.append(np.var(lap))
             
-            if len(variances) < 4: return 0
-            
+            if len(variances) < 4:
+                return 0
+
             mean_var = np.mean(variances)
             std_var = np.std(variances)
-            if mean_var < 1e-5: return 0
+            if mean_var < 1e-5:
+                return 0
             
             cv = std_var / mean_var
             return min(100, int(cv * 60)) # Ajustado peso
@@ -350,8 +357,9 @@ class DeepfakeAnalysisModule:
         Melhorado para ser mais sensível a padrões de interpolação e Diffusion.
         """
         try:
-            if roi.shape[0] < 32 or roi.shape[1] < 32: return 0
-                
+            if roi.shape[0] < 32 or roi.shape[1] < 32:
+                return 0
+
             # Aplicar janela de Hanning para reduzir leakage espectral
             win_y = np.hanning(roi.shape[0])
             win_x = np.hanning(roi.shape[1])
@@ -372,7 +380,8 @@ class DeepfakeAnalysisModule:
             dist_from_center = np.sqrt((x - cx)**2 + (y - cy)**2)
             
             mask_high = dist_from_center > (min(h, w) * 0.4)
-            if not np.any(mask_high): return 0
+            if not np.any(mask_high):
+                return 0
             
             high_freq_values = log_mag[mask_high]
             
@@ -397,8 +406,9 @@ class DeepfakeAnalysisModule:
         Imagens AI tendem a ter padrões de textura local muito uniformes em certas áreas.
         """
         try:
-            if roi.shape[0] < 32 or roi.shape[1] < 32: return 0
-            
+            if roi.shape[0] < 32 or roi.shape[1] < 32:
+                return 0
+
             scores = []
             # Diferentes escalas para capturar texturas variadas
             configs = [(8, 1), (16, 2), (24, 3)]
@@ -417,8 +427,10 @@ class DeepfakeAnalysisModule:
                 
                 # Heurística de score parcial
                 p_score = 0
-                if entropy < (P * 0.15): p_score += 40 # Muito baixa entropia
-                if max_bin_ratio > 0.3: p_score += 40 # Concentração excessiva
+                if entropy < (P * 0.15):
+                    p_score += 40  # Muito baixa entropia
+                if max_bin_ratio > 0.3:
+                    p_score += 40  # Concentração excessiva
                 scores.append(p_score)
                 
             return min(100, int(np.mean(scores)))

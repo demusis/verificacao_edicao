@@ -4,10 +4,10 @@ Configuração centralizada para análise forense.
 Este módulo define a estrutura de configuração tipada usando dataclasses,
 eliminando a necessidade de dicionários espalhados pelo código.
 """
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import Any, Optional
 import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -102,7 +102,7 @@ class AnalysisConfig:
         Returns:
             Nova instância de AnalysisConfig.
         """
-        valid_fields = {f for f in cls.__dataclass_fields__}
+        valid_fields = set(cls.__dataclass_fields__)
         filtered = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**filtered)
     
@@ -120,7 +120,7 @@ class AnalysisConfig:
             FileNotFoundError: Se o arquivo não existir.
             json.JSONDecodeError: Se o JSON for inválido.
         """
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             data = json.load(f)
         return cls.from_dict(data)
     

@@ -1,7 +1,9 @@
-from pathlib import Path
-import struct
 import json
+import struct
+from pathlib import Path
+
 from core.case_manager import CaseManager
+
 
 class StructureAnalysisModule:
     """
@@ -55,9 +57,7 @@ class StructureAnalysisModule:
                 atom_type = type_bytes.decode('ascii', errors='ignore')
                 
                 # Handle large atoms (size=1 means 64-bit size follows)
-                header_size = 8
                 if size == 1:
-                    header_size = 16
                     large_size_data = f.read(8)
                     if len(large_size_data) < 8:
                         break
@@ -65,7 +65,12 @@ class StructureAnalysisModule:
                 elif size == 0:
                     # Size 0 means atom extends to end of file
                     size = file_size - offset
-                
+
+                # Tamanho menor que o próprio cabeçalho indica arquivo
+                # malformado — abortar evita loop infinito (offset não avança).
+                if size < 8:
+                    break
+
                 atoms.append({
                     "type": atom_type,
                     "offset": offset,

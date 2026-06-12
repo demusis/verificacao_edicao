@@ -6,13 +6,14 @@ de análise de cena e verificação de timestamps PTS/DTS.
 """
 import json
 import re
-import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
+from adapters.ffmpeg_adapter import FFmpegAdapter
 from core.case_manager import CaseManager
 from core.config_schema import AnalysisConfig
-from adapters.ffmpeg_adapter import FFmpegAdapter
+from core.subprocess_utils import LONG_TIMEOUT, run_command
 
 
 class ContinuityModule:
@@ -34,7 +35,7 @@ class ContinuityModule:
     def __init__(
         self,
         case_manager: CaseManager,
-        config: Optional[AnalysisConfig] = None
+        config: AnalysisConfig | None = None
     ) -> None:
         """Inicializa o módulo de continuidade.
         
@@ -50,9 +51,9 @@ class ContinuityModule:
     def run(
         self,
         input_file: Path,
-        threshold: Optional[float] = None,
+        threshold: float | None = None,
         output_filename: str = "continuity_analysis.json",
-        progress_callback: Optional[Callable[[str], None]] = None
+        progress_callback: Callable[[str], None] | None = None
     ) -> dict[str, Any]:
         """Executa análise de continuidade no vídeo.
         
@@ -145,13 +146,15 @@ class ContinuityModule:
         ]
         
         self.logger.log("EXEC_COMMAND", {"command": " ".join(cmd)})
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
+        result = run_command(cmd, timeout=LONG_TIMEOUT)
+
         cuts: list[dict[str, Any]] = []
         pattern = re.compile(r"n:\s*(\d+)\s+pts:\s*(\d+)\s+pts_time:([\d\.]+)")
-        
+
+        showinfo_lines = 0
         for line in result.stderr.split('\n'):
             if "pts_time" in line and "Parsed_showinfo" in line:
+                showinfo_lines += 1
                 match = pattern.search(line)
                 if match:
                     cuts.append({
@@ -159,7 +162,16 @@ class ContinuityModule:
                         "pts": int(match.group(2)),
                         "timestamp": float(match.group(3))
                     })
-        
+
+        # Se o showinfo produziu linhas mas nenhuma casou com a regex, o
+        # formato de saída do ffmpeg provavelmente mudou — registrar para
+        # não mascarar como "zero cortes detectados".
+        if showinfo_lines and not cuts:
+            self.logger.log("SCENE_DETECT_WARNING", {
+                "msg": "Saída do showinfo não reconhecida pela regex",
+                "showinfo_lines": showinfo_lines
+            })
+
         return cuts
     
     def _analyze_timestamps(self, input_file: Path) -> list[dict[str, Any]]:

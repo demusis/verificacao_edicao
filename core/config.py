@@ -1,14 +1,13 @@
-import os
+import sys
+from datetime import timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from datetime import timezone, timedelta
 
 # Informações da Aplicação
 APP_NAME = "ForensicVideoAnalyzer"
 APP_VERSION = "0.1.0"
 
 # Configurações de Diretório
-import sys
 if getattr(sys, 'frozen', False):
     # Executando como bundle (PyInstaller)
     BUNDLE_DIR = Path(sys._MEIPASS)

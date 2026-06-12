@@ -10,10 +10,9 @@ Exemplo de uso:
 """
 import json
 import logging
-import sys
 import os
+import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -22,15 +21,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from core.case_manager import CaseManager
 from core.config_schema import AnalysisConfig
-from modules.file_analysis import FileAnalysisModule
-from modules.continuity import ContinuityModule
 from modules.compression_analysis import CompressionAnalysisModule
+from modules.continuity import ContinuityModule
+from modules.deepfake_analysis import DeepfakeAnalysisModule
+from modules.file_analysis import FileAnalysisModule
+from modules.image_forensics import ImageForensicsModule
 from modules.prnu_analysis import PrnuAnalysisModule
 from modules.quantization_analysis import QuantizationAnalysisModule
-from modules.structure_analysis import StructureAnalysisModule
-from modules.image_forensics import ImageForensicsModule
-from modules.deepfake_analysis import DeepfakeAnalysisModule
 from modules.reporting import ReportingModule
+from modules.structure_analysis import StructureAnalysisModule
 
 # Configurar logging básico
 logging.basicConfig(
@@ -92,7 +91,7 @@ def analyze(
         dir_okay=False,
         resolve_path=True
     ),
-    case_name: Optional[str] = typer.Option(
+    case_name: str | None = typer.Option(
         None,
         help="Nome do caso. Se omitido, será gerado automaticamente."
     ),
@@ -141,7 +140,7 @@ def analyze(
         logger.log("CLI_START", {"input_file": str(input_file)})
     except Exception as e:
         typer.secho(f"Erro crítico na inicialização: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
     
     prefix = f"01_{input_file.stem}"
     is_video = _is_video(input_file)

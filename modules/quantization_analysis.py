@@ -1,8 +1,10 @@
-from pathlib import Path
 import json
-import subprocess
 import re
+from pathlib import Path
+
 from core.case_manager import CaseManager
+from core.subprocess_utils import run_command
+
 
 class QuantizationAnalysisModule:
     """
@@ -69,7 +71,7 @@ class QuantizationAnalysisModule:
         
         try:
             # Precisamos capturar STDERR
-            res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+            res = run_command(cmd)
             log = res.stderr
             
             # Parser simplificado
@@ -89,9 +91,12 @@ class QuantizationAnalysisModule:
             match_prof = re.search(r"profile_idc\s*.*?(\d+)", log)
             if match_prof:
                 pidc = int(match_prof.group(1))
-                if pidc == 66: profile = "Baseline"
-                elif pidc == 77: profile = "Main"
-                elif pidc == 100: profile = "High"
+                if pidc == 66:
+                    profile = "Baseline"
+                elif pidc == 77:
+                    profile = "Main"
+                elif pidc == 100:
+                    profile = "High"
             
             # --- Reference Frames ---
             # num_ref_frames usually appears in SPS log
@@ -130,7 +135,7 @@ class QuantizationAnalysisModule:
             }
             
         except Exception as e:
-            return {"error": f"Trace failed: {str(e)}"}
+            return {"error": f"Trace failed: {e!s}"}
 
     def _calculate_bpp(self, input_file: Path) -> dict:
         """
@@ -147,23 +152,27 @@ class QuantizationAnalysisModule:
                 "-of", "json",
                 str(input_file)
             ]
-            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            res = run_command(cmd, check=True, timeout=120)
             data = json.loads(res.stdout)
-            stream = data.get('streams', [{}])[0]
-            
-            w = int(stream.get('width', 0))
-            h = int(stream.get('height', 0))
-            br_str = stream.get('bit_rate', '0')
-            fps_str = stream.get('avg_frame_rate', '0/0')
-            
-            # FPS parser
-            if '/' in fps_str:
-                num, den = map(int, fps_str.split('/'))
-                fps = num / den if den != 0 else 0
-            else:
-                fps = float(fps_str)
-                
-            bitrate = int(br_str) if br_str != 'N/A' else 0
+            streams = data.get('streams') or [{}]
+            stream = streams[0]
+
+            w = int(stream.get('width') or 0)
+            h = int(stream.get('height') or 0)
+            br_str = str(stream.get('bit_rate') or '0')
+            fps_str = str(stream.get('avg_frame_rate') or '0/0')
+
+            # FPS parser ('30000/1001', '30' ou 'N/A')
+            try:
+                if '/' in fps_str:
+                    num, den = map(int, fps_str.split('/'))
+                    fps = num / den if den != 0 else 0
+                else:
+                    fps = float(fps_str)
+            except ValueError:
+                fps = 0
+
+            bitrate = int(br_str) if br_str.isdigit() else 0
             
             bpp = 0.0
             if w > 0 and h > 0 and fps > 0:
